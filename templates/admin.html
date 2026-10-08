@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RescuNet – {% if role == 'admin' %}Control Room{% else %}Camp Manager{% endif %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/static/siren.js"></script>
+<style>body{background:#0B192C;color:#e6edf5;font-family:system-ui,sans-serif}.card{background:#13294B;border:1px solid rgba(255,255,255,.1);border-radius:16px}
+input,select,textarea{background:#0B192C;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px;width:100%;color:#fff}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:2px}
+@keyframes flashBar{0%,100%{background:#9b1c1c}50%{background:#E53E3E}}.flashbar{animation:flashBar .9s infinite}
+@media(prefers-reduced-motion:reduce){.flashbar{animation:none}}
+.leaflet-container{background:#0B192C}.leaflet-tile-pane{filter:brightness(.72) saturate(.8) contrast(1.05)}</style></head>
+<body>
+<header class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-white/10">
+  <div><h1 class="text-2xl font-extrabold">RescuNet <span class="text-[#E53E3E]">{% if role == 'admin' %}Control Room{% else %}Camp Manager{% endif %}</span></h1>
+    <p class="text-sm text-slate-400">Authorized personnel only · signed in as {{ admin_name }} ({{ role }})</p></div>
+  <div class="flex items-center gap-2 text-sm"><span id="conn" class="px-3 py-1 rounded-full bg-white/10">Connecting…</span>
+    {% if role == 'admin' %}<a href="/admin/tools" class="px-3 py-1 rounded-full border border-white/30">Test tools &amp; staff</a>{% endif %}
+    <a href="/" class="px-3 py-1 rounded-full border border-white/30">Public view</a>
+    <button id="logout" class="px-3 py-1 rounded-full border border-white/30">Logout</button></div>
+</header>
+<main class="max-w-6xl mx-auto p-5 space-y-6">
+{% if role == 'admin' %}
+  <!-- ===== Live status indicator ===== -->
+  <div id="statusBar" class="rounded-xl px-5 py-3 font-bold text-lg bg-green-800" role="status">Checking sensors…</div>
+
+  <!-- ===== Master siren (typed confirmation) ===== -->
+  <section class="card p-6 border-[#E53E3E]">
+    <h2 class="text-xl font-bold mb-1">Master siren</h2>
+    <p class="text-sm text-slate-300 mb-3">Sounds the siren and full-screen evacuation warning on EVERY connected device and sends an SMS to all registered phone numbers. Every use is logged with your name.</p>
+    <label for="sirenMsg" class="text-sm">Evacuation message (optional)</label>
+    <textarea id="sirenMsg" rows="2" placeholder="Leave empty to use the standard evacuation order (English + Hindi)"></textarea>
+    <button id="sirenBtn" class="mt-4 w-full bg-[#E53E3E] hover:bg-red-600 text-white text-2xl font-extrabold py-5 rounded-xl">⚠️ MASTER SIREN TRIGGER</button>
+  </section>
+{% else %}
+  <div class="card p-4 text-sm text-slate-300">You can update relief-camp occupancy and stock. Siren, sensors and SOS dispatch are restricted to control-room officers.</div>
+{% endif %}
+
+  <section class="grid lg:grid-cols-2 gap-6">
+  {% if role == 'admin' %}
+    <div class="card p-5"><h2 class="text-xl font-bold mb-1">IoT water sensors</h2><p class="text-sm text-slate-400 mb-4">Bar turns yellow at 12 m (watch), orange at 14 m (warning), red at 15 m (danger → automatic siren near that sensor).</p><div id="sensors" class="space-y-4"></div></div>
+  {% endif %}
+    <div class="card p-5 {% if role != 'admin' %}lg:col-span-2{% endif %}"><h2 class="text-xl font-bold mb-4">Relief camps</h2><div id="camps" class="space-y-4"></div></div>
+  </section>
+
+{% if role == 'admin' %}
+  <!-- ===== SOS dispatch ===== -->
+  <section class="card p-5">
+    <div class="flex flex-wrap justify-between items-center gap-2 mb-3"><h2 class="text-xl font-bold">Active SOS signals <span class="text-sm font-normal text-slate-400">(high priority first)</span></h2>
+      <span class="text-sm text-slate-400">Volunteers registered: <b id="volTotal">0</b> · with live location: <b id="volLoc">0</b></span></div>
+    <ul id="sos" class="space-y-3 text-sm"></ul>
+  </section>
+  <section class="card p-3"><h2 class="font-bold px-2 pb-2">Map: SOS 🆘 · volunteers 🟢 · camps ⛺ · sensors 🌊</h2><div id="adminMap" style="height:360px;border-radius:12px"></div></section>
+
+  <section class="grid lg:grid-cols-2 gap-6">
+    <div class="card p-5"><h2 class="text-xl font-bold mb-3">Audit log</h2><ul id="audit" class="space-y-1 text-xs text-slate-300 max-h-80 overflow-y-auto"></ul></div>
+    <div class="card p-5">
+      <h2 class="text-xl font-bold mb-1">SMS gateway <span id="smsMode" class="text-xs ml-2 px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-300"></span></h2>
+      <p id="smsStatus" class="text-xs text-slate-400 mb-3"></p>
+      <ul id="smsList" class="space-y-1 text-xs max-h-72 overflow-y-auto"></ul>
+    </div>
+  </section>
+
+  <!-- ===== Master siren confirmation ===== -->
+  <div id="sirenModal" class="hidden fixed inset-0 z-[1500] bg-black/80 flex items-center justify-center p-4">
+    <div class="card p-6 max-w-md w-full border-2 border-[#E53E3E]">
+      <h3 class="text-xl font-extrabold text-[#E53E3E] mb-2">⚠️ Confirm MASTER SIREN</h3>
+      <p class="text-sm text-slate-200 mb-3">The siren and full-screen warning will start on <b>every connected device</b>, and an SMS will go to <b id="smsCount">0</b> registered phone number(s). False alarms cause panic. This action is logged under your name.</p>
+      <label for="sirenConfirm" class="text-sm">Type <b>SIREN</b> to confirm</label>
+      <input id="sirenConfirm" autocomplete="off" placeholder="SIREN">
+      <div class="flex gap-3 mt-4"><button id="sirenGo" disabled class="flex-1 py-3 rounded-lg bg-[#E53E3E] font-extrabold disabled:opacity-40">Sound siren now</button><button id="sirenNo" class="flex-1 py-3 rounded-lg border border-white/30">Cancel</button></div>
+    </div>
+  </div>
+{% endif %}
+</main>
+<script>
+const ROLE='{{ role }}',$=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const api=async(u,b)=>{try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const d=await r.json();if(!r.ok)alert(d.error||'Error');return d}catch(e){alert('Network error - is the server running?');return{error:'network'}}};
+const URG={critical_medical:'🩺 Critical medical',stranded_food_needed:'🍞 Stranded – food',general:'🆘 General'};
+const PRI={high:'bg-red-600',medium:'bg-orange-500',low:'bg-blue-600'},PO={high:0,medium:1,low:2};
+let S={sensors:[],camps:[],alerts:[],volunteers_list:[],sms_recipients:0},lastSiren=null;
+const levelColor=l=>l>=15?'#E53E3E':l>=14?'#ED8936':l>=12?'#ECC94B':'#38A169';
+const km=(a,b,c,d)=>{const r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.asin(Math.sqrt(h))};
+
+/* ---- camps (officers + camp managers): occupancy / stock with validation and warnings ---- */
+function rCamps(){$('camps').innerHTML=S.camps.map(c=>{
+  const p=Math.round(c.occupied/c.capacity*100),w=[];
+  if(p>=90)w.push('FULL '+p+'%');else if(p>=80)w.push('High occupancy '+p+'%');
+  if(c.food_stock<25)w.push('Low food');if(c.medical_stock<25)w.push('Low medicine');
+  return `<div class="rounded-xl bg-[#0B192C] p-4"><div class="flex flex-wrap justify-between gap-2"><span><b>${esc(c.name)}</b> <span class="text-xs text-slate-400">capacity ${c.capacity} · ${p}% full</span></span>
+   <span>${w.map(x=>`<span class="text-[11px] px-2 py-0.5 rounded-full font-bold ml-1 ${/FULL|Low/.test(x)?'bg-red-600':'bg-orange-500'}">⚠ ${x}</span>`).join('')}</span></div>
+   <div class="grid grid-cols-3 gap-2 mt-2 text-xs"><label>Occupied (0–${c.capacity})<input id="oc${c.id}" type="number" min="0" max="${c.capacity}" value="${c.occupied}"></label><label>Food % (0–100)<input id="fd${c.id}" type="number" min="0" max="100" value="${c.food_stock}"></label><label>Medical % (0–100)<input id="md${c.id}" type="number" min="0" max="100" value="${c.medical_stock}"></label></div>
+   <button onclick="saveCamp(${c.id})" class="mt-3 px-4 py-1 rounded bg-white/15 hover:bg-white/25 font-semibold text-sm">Save</button></div>`}).join('')}
+async function saveCamp(id){
+  const c=S.camps.find(x=>x.id===id),o=+$('oc'+id).value,f=+$('fd'+id).value,m=+$('md'+id).value;
+  if(!Number.isInteger(o)||o<0||o>c.capacity)return alert(`Occupied must be a whole number from 0 to ${c.capacity}`);
+  if(!Number.isInteger(f)||f<0||f>100||!Number.isInteger(m)||m<0||m>100)return alert('Food and medical stock must be whole numbers from 0 to 100');
+  const d=await api('/api/admin/camps/'+id,{occupied:o,food_stock:f,medical_stock:m});if(d.ok)await load();
+}
+$('logout').onclick=async()=>{await api('/api/auth/logout');location.href='/login'};
+const socket=io();
+socket.on('connect',()=>{$('conn').textContent='● Live';$('conn').className='px-3 py-1 rounded-full bg-green-900 text-green-300'});
+socket.on('disconnect',()=>{$('conn').textContent='Offline';$('conn').className='px-3 py-1 rounded-full bg-red-900 text-red-300'});
+socket.on('flood_emergency_alert',showFlood);
+
+{% if role == 'admin' %}
+/* ---- status bar: colour-coded, flashes red when a river is above danger level ---- */
+function rStatus(){
+  const crit=S.sensors.filter(s=>s.state==='critical'),warn=S.sensors.filter(s=>s.state==='warning'),el=$('statusBar');
+  const ls=lastSiren?` · Last siren ${lastSiren.time.slice(11,16)} (${lastSiren.action==='AUTO_SIREN'?'automatic':'manual: '+esc(lastSiren.actor)})`:' · No siren yet';
+  if(crit.length){el.className='rounded-xl px-5 py-3 font-bold text-lg flashbar';el.innerHTML='🔴 DANGER LEVEL – '+crit.map(s=>esc(s.name)+' '+s.current_level.toFixed(1)+' m').join(', ')+ls}
+  else if(warn.length){el.className='rounded-xl px-5 py-3 font-bold text-lg bg-orange-600';el.innerHTML='🟠 WARNING – '+warn.map(s=>esc(s.name)+' '+s.current_level.toFixed(1)+' m').join(', ')+ls}
+  else{el.className='rounded-xl px-5 py-3 font-bold text-lg bg-green-800';el.innerHTML='🟢 All sensors normal'+ls}
+}
+function rSensors(){$('sensors').innerHTML=S.sensors.map(s=>{const p=Math.min(100,s.current_level/18*100),tr=s.trend>=.2?`▲ +${s.trend.toFixed(1)} m rising`:s.trend<=-.2?`▼ ${s.trend.toFixed(1)} m falling`:'● steady';
+  return `<div class="rounded-xl bg-[#0B192C] p-4"><div class="flex justify-between"><b>${esc(s.name)}</b><span class="text-xs uppercase font-bold" style="color:${levelColor(s.current_level)}">${s.state}</span></div>
+  <div class="flex items-end justify-between my-2"><div class="text-3xl font-extrabold">${s.current_level.toFixed(1)} m</div><div class="text-sm text-slate-300">${tr}</div></div>
+  <div class="relative h-2 rounded bg-white/15 mb-1"><div class="h-2 rounded" style="width:${p}%;background:${levelColor(s.current_level)}"></div><span class="absolute h-4 w-px bg-orange-400" style="top:-4px;left:${14/18*100}%"></span><span class="absolute h-4 w-px bg-red-500" style="top:-4px;left:${15/18*100}%"></span></div>
+  <div class="text-xs text-slate-400 mb-2">Updated: ${esc(s.updated_at?s.updated_at.slice(11):'no reading yet')}</div>
+  <div class="flex gap-2"><input id="lvl${s.id}" type="number" step="0.1" min="0" max="50" placeholder="New level (m)" aria-label="New level for ${esc(s.name)}"><button onclick="setLevel(${s.id})" class="px-4 rounded bg-white/15 hover:bg-white/25 font-semibold">Update</button></div></div>`}).join('');rStatus()}
+async function setLevel(id){const v=parseFloat($('lvl'+id).value);if(isNaN(v)||v<0||v>50)return alert('Enter a level between 0 and 50 metres');
+  const d=await api('/api/sensors/update',{sensor_id:id,current_level:v});
+  if(d.ok&&d.sensor.state==='critical'&&!d.emergency)alert('Above danger level, but the siren already sounded recently for this sensor (it repeats every 2 minutes). Use MASTER SIREN to sound it again now.');rAudit()}
+
+/* ---- SOS dispatch ---- */
+function rSos(){
+  $('volTotal').textContent=S.volunteers_list.length;$('volLoc').textContent=S.volunteers_list.filter(v=>v.lat!=null).length;
+  const list=[...S.alerts].sort((a,b)=>(PO[a.priority]??2)-(PO[b.priority]??2)||b.id-a.id);
+  $('sos').innerHTML=list.length?list.map(a=>{
+    const vs=S.volunteers_list.map(v=>({...v,d:v.lat!=null?km(a.latitude,a.longitude,v.lat,v.lng):null})).sort((x,y)=>(x.d??1e9)-(y.d??1e9));
+    const opts=vs.map(v=>`<option value="${v.id}">${esc(v.name)} (${esc(v.skill)})${v.d!=null?' – '+v.d.toFixed(1)+' km':' – no location'}</option>`).join('');
+    return `<li class="rounded-xl bg-[#0B192C] p-3 space-y-2"><div class="flex flex-wrap justify-between gap-2 items-center">
+      <span><span class="text-xs px-2 py-1 rounded-full font-bold ${PRI[a.priority]||PRI.low}">${(a.priority||'low').toUpperCase()}</span> <b class="ml-1">${URG[a.urgency_level]}</b></span>
+      <span class="text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-300">${a.status.replace(/_/g,' ')}${a.volunteer_name?' · '+esc(a.volunteer_name):''}</span></div>
+      <div class="text-slate-300">${esc(a.name)} ${esc(a.phone)} · GPS ${a.latitude.toFixed(5)}, ${a.longitude.toFixed(5)}${a.accuracy_m!=null?' (±'+a.accuracy_m+' m)':''}<br><span class="text-slate-400 text-xs">${esc(a.created_at.slice(11))} · ${a.volunteers_notified} volunteer(s) alerted</span></div>
+      <div class="flex flex-wrap gap-2 items-center"><select id="dv${a.id}" class="max-w-[16rem]">${opts||'<option value="">No volunteers</option>'}</select>
+        <button onclick="dispatch(${a.id},false)" class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-xs font-bold">Dispatch</button>
+        <button onclick="dispatch(${a.id},true)" class="px-3 py-2 rounded bg-white/15 hover:bg-white/25 text-xs font-bold">Alert all volunteers</button>
+        <a class="px-3 py-2 rounded border border-white/30 text-xs font-bold" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${a.latitude},${a.longitude}">🧭 Directions</a>
+        <button onclick="resolve(${a.id})" class="ml-auto px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-xs font-bold">Resolve</button></div></li>`}).join('')
+    :'<li class="text-slate-400">No active SOS signals.</li>';
+  drawMap();
+}
+async function dispatch(id,all){const v=$('dv'+id).value;if(!all&&!v)return alert('Choose a volunteer');const d=await api('/api/admin/alerts/'+id+'/dispatch',all?{all:true}:{volunteer_id:+v});if(d.ok){alert(d.dispatched?`Sent to ${d.dispatched} volunteer(s) (app + SMS).`:'Already sent to that volunteer.');await load()}}
+async function resolve(id){await api('/api/admin/alerts/'+id+'/resolve');S.alerts=S.alerts.filter(a=>a.id!==id);rSos();rAudit()}
+
+/* ---- map preview ---- */
+const map=L.map('adminMap',{scrollWheelZoom:false}).setView([25.60,85.15],11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
+const mg=L.layerGroup().addTo(map),dot=(c,t)=>L.divIcon({className:'',html:`<div style="background:${c};color:#fff;border:2px solid #fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px">${t}</div>`,iconSize:[26,26]});
+function drawMap(){mg.clearLayers();
+  S.alerts.forEach(a=>L.marker([a.latitude,a.longitude],{icon:dot('#E53E3E','!')}).bindPopup(esc(a.name)+' · '+URG[a.urgency_level]).addTo(mg));
+  S.volunteers_list.filter(v=>v.lat!=null).forEach(v=>L.marker([v.lat,v.lng],{icon:dot('#38A169','V')}).bindPopup(esc(v.name)).addTo(mg));
+  S.camps.forEach(c=>L.marker([c.lat,c.lng],{icon:dot('#2F855A','⛺')}).bindPopup(esc(c.name)).addTo(mg));
+  S.sensors.forEach(s=>L.marker([s.lat,s.lng],{icon:dot('#1E6FE0','🌊')}).bindPopup(esc(s.name)+' '+s.current_level.toFixed(1)+' m').addTo(mg))}
+
+/* ---- audit + SMS gateway ---- */
+async function rAudit(){const r=await fetch('/api/admin/audit');if(!r.ok)return;const a=await r.json();
+  lastSiren=a.find(x=>x.action==='MASTER_SIREN'||x.action==='AUTO_SIREN')||null;rStatus();
+  $('audit').innerHTML=a.map(x=>`<li>${esc(x.time.slice(11))} · <b>${esc(x.actor)}</b> · ${esc(x.action)} ${esc(x.detail)}</li>`).join('')}
+async function rSms(){const r=await fetch('/api/admin/sms');if(!r.ok)return;const d=await r.json(),p=d.provider;
+  $('smsMode').textContent=p.live?'LIVE: '+d.mode:'DEMO mode';$('smsMode').className='text-xs ml-2 px-2 py-1 rounded-full '+(p.live&&p.ready?'bg-green-700 text-white':p.live?'bg-red-700 text-white':'bg-yellow-500/20 text-yellow-300');
+  $('smsStatus').textContent=!p.live?'Messages are NOT really sent (demo). Set SMS_MODE and provider keys to go live.':p.ready?'Provider configured. Use Test tools to send a test SMS.':'Provider NOT configured. Missing: '+p.missing.join(', ');
+  $('smsList').innerHTML=d.messages.map(m=>`<li class="rounded bg-[#0B192C] p-2"><span class="${m.dir==='in'?'text-sky-300':'text-green-300'} font-bold">${m.dir==='in'?'⬅ from':'➡ to'} ${esc(m.to)}</span> ${m.name?'('+esc(m.name)+')':''} · <span class="text-slate-400">${esc(m.time.slice(11))} · ${esc(m.kind)} · ${esc(m.status)}</span><br>${esc(m.text)}</li>`).join('')||'<li class="text-slate-400">No messages yet.</li>'}
+
+/* ---- master siren: typed confirmation ---- */
+$('sirenBtn').onclick=()=>{$('smsCount').textContent=S.sms_recipients;$('sirenConfirm').value='';$('sirenGo').disabled=true;$('sirenModal').classList.remove('hidden');$('sirenConfirm').focus()};
+$('sirenConfirm').oninput=()=>{$('sirenGo').disabled=$('sirenConfirm').value.trim().toUpperCase()!=='SIREN'};
+$('sirenNo').onclick=()=>$('sirenModal').classList.add('hidden');
+$('sirenGo').onclick=async()=>{$('sirenGo').disabled=true;await api('/api/admin/siren',{message:$('sirenMsg').value});$('sirenModal').classList.add('hidden');rAudit();rSms()};
+
+socket.on('sensor_update',s=>{const i=S.sensors.findIndex(x=>x.id===s.id);if(i>-1)S.sensors[i]=s;rSensors();drawMap()});
+socket.on('new_distress_alert',a=>{S.alerts=S.alerts.filter(x=>x.id!==a.id);S.alerts.unshift(a);rSos()});
+socket.on('sos_update',u=>{const i=S.alerts.findIndex(x=>x.id===u.id);if(i<0)return;if(u.status==='resolved')S.alerts.splice(i,1);else Object.assign(S.alerts[i],u);rSos();rAudit()});
+{% endif %}
+
+async function load(){const r=await fetch('/api/state');S=await r.json();rCamps();
+  {% if role == 'admin' %}rSensors();rSos();rAudit();{% endif %}}
+load();
+{% if role == 'admin' %}rSms();setInterval(rAudit,15000);setInterval(rSms,5000);{% endif %}
+</script></body></html>

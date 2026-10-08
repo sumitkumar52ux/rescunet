@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RescuNet – Test tools &amp; staff</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{background:#0B192C;color:#e6edf5;font-family:system-ui,sans-serif}.card{background:#13294B;border:1px solid rgba(255,255,255,.1);border-radius:16px}
+input{background:#0B192C;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px;width:100%;color:#fff}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:2px}</style></head>
+<body>
+<header class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-white/10">
+  <div><h1 class="text-2xl font-extrabold">Test tools &amp; staff</h1><p class="text-sm text-slate-400">Control-room officers only · {{ admin_name }}. Keep these away from the live control room screen.</p></div>
+  <a href="/admin" class="px-3 py-1 rounded-full border border-white/30 text-sm">← Control room</a>
+</header>
+<main class="max-w-4xl mx-auto p-5 grid md:grid-cols-2 gap-6">
+  <section class="card p-5 space-y-2">
+    <h2 class="text-xl font-bold">Simulate an incoming SMS</h2>
+    <p class="text-xs text-slate-400">Pretend a phone sent this text (no SMS provider needed). Results appear in the SMS outbox on the control room page.</p>
+    <label class="text-xs" for="smFrom">From phone</label><input id="smFrom" placeholder="9876543210">
+    <label class="text-xs" for="smBody">Message</label><input id="smBody" placeholder="SOS medical 25.61,85.16">
+    <button id="smSend" class="w-full py-2 rounded bg-white/15 hover:bg-white/25 font-semibold">Send as that phone</button>
+    <p id="smReply" class="text-xs text-green-300"></p>
+  </section>
+  <section class="card p-5 space-y-2">
+    <h2 class="text-xl font-bold">Send a test SMS</h2>
+    <p class="text-xs text-slate-400">Checks your SMS provider settings. In demo mode nothing is really sent.</p>
+    <label class="text-xs" for="tPhone">Phone</label><input id="tPhone" placeholder="9876543210">
+    <button id="tSend" class="w-full py-2 rounded bg-white/15 hover:bg-white/25 font-semibold">Send test SMS</button>
+    <p id="tRes" class="text-xs text-green-300"></p>
+  </section>
+  <section class="card p-5 space-y-2 md:col-span-2">
+    <h2 class="text-xl font-bold">Create a camp-manager account</h2>
+    <p class="text-xs text-slate-400">Camp managers can update relief-camp occupancy and stock only. They cannot sound the siren, change sensors or dispatch volunteers.</p>
+    <div class="grid sm:grid-cols-3 gap-2"><div><label class="text-xs" for="cName">Name</label><input id="cName"></div><div><label class="text-xs" for="cUser">Username</label><input id="cUser"></div><div><label class="text-xs" for="cPass">Password (8+ chars)</label><input id="cPass" type="password"></div></div>
+    <button id="cSend" class="px-5 py-2 rounded bg-white/15 hover:bg-white/25 font-semibold">Create account</button>
+    <p id="cRes" class="text-xs text-green-300"></p>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const api=async(u,b)=>{try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const d=await r.json();if(!r.ok)alert(d.error||'Error');return d}catch(e){alert('Network error');return{}}};
+$('smSend').onclick=async()=>{const d=await api('/api/admin/sms/simulate',{from:$('smFrom').value,body:$('smBody').value});if(d.reply)$('smReply').textContent='Reply: '+d.reply};
+$('tSend').onclick=async()=>{const d=await api('/api/admin/sms/test',{phone:$('tPhone').value});if(d.ok)$('tRes').textContent='Status: '+d.status};
+$('cSend').onclick=async()=>{const d=await api('/api/admin/users',{name:$('cName').value,username:$('cUser').value,password:$('cPass').value});if(d.ok){$('cRes').textContent='Created: '+d.user.name+' (camp_manager)';$('cPass').value=''}};
+</script></body></html>

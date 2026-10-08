@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RescuNet – Sign in</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{background:#0B192C;color:#e6edf5;font-family:system-ui,sans-serif}input,select{background:#0B192C;color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:10px;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid #1E6FE0;outline-offset:2px}</style></head>
+<body class="min-h-screen flex items-center justify-center p-4">
+<div class="w-full max-w-md bg-[#13294B] rounded-2xl border border-white/10 shadow p-6">
+  <a href="/" class="text-2xl font-extrabold">Rescu<span class="text-[#1E6FE0]">Net</span></a>
+  <div class="flex gap-2 my-4" role="tablist">
+    <button id="tLogin" class="flex-1 py-2 rounded-lg font-bold bg-[#1E6FE0]/30 text-[#9cc4ff]">Login</button>
+    <button id="tReg" class="flex-1 py-2 rounded-lg font-bold text-slate-300">Register</button>
+  </div>
+  <form id="fLogin" class="space-y-3">
+    <div><label class="text-sm" for="lUser">Username</label><input id="lUser" autocomplete="username" required></div>
+    <div><label class="text-sm" for="lPass">Password</label><input id="lPass" type="password" autocomplete="current-password" required></div>
+    <button class="w-full bg-[#1E6FE0] text-white font-bold rounded-lg py-2">Login</button>
+    <p class="text-xs text-slate-400">Officials and camp managers use the account issued by the authority.</p>
+  </form>
+  <form id="fReg" class="space-y-3 hidden">
+    <div><label class="text-sm" for="rName">Full name</label><input id="rName" required></div>
+    <div><label class="text-sm" for="rUser">Username</label><input id="rUser" minlength="3" required></div>
+    <div><label class="text-sm" for="rPass">Password (6+ characters)</label><input id="rPass" type="password" minlength="6" autocomplete="new-password" required></div>
+    <div><label class="text-sm" for="rPhone">Phone (10 digits - for SMS alerts and SOS by SMS)</label><input id="rPhone" type="tel"></div>
+    <div><label class="text-sm" for="rRole">I am a</label><select id="rRole"><option value="citizen">Citizen / may need help</option><option value="volunteer">Community volunteer (receive nearby SOS)</option></select></div>
+    <button class="w-full bg-[#38A169] text-white font-bold rounded-lg py-2">Create account</button>
+  </form>
+  <p id="err" class="text-sm text-red-400 mt-3" role="alert"></p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const q=new URLSearchParams(location.search);let next=q.get('next')||'';
+if(!next.startsWith('/')||next.startsWith('//'))next='';          // only same-site redirects
+function tab(reg){$('fLogin').classList.toggle('hidden',reg);$('fReg').classList.toggle('hidden',!reg);
+  $('tLogin').className='flex-1 py-2 rounded-lg font-bold '+(reg?'text-slate-300':'bg-[#1E6FE0]/30 text-[#9cc4ff]');
+  $('tReg').className='flex-1 py-2 rounded-lg font-bold '+(reg?'bg-[#1E6FE0]/30 text-[#9cc4ff]':'text-slate-300');$('err').textContent=''}
+$('tLogin').onclick=()=>tab(false);$('tReg').onclick=()=>tab(true);if(location.hash==='#register')tab(true);
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return{ok:r.ok,d:await r.json()}}
+function done(u){location.href=next||((u.role==='admin'||u.role==='camp_manager')?'/admin':'/')}
+$('fLogin').onsubmit=async e=>{e.preventDefault();const{ok,d}=await post('/api/auth/login',{username:$('lUser').value,password:$('lPass').value});ok?done(d.user):$('err').textContent=d.error};
+$('fReg').onsubmit=async e=>{e.preventDefault();const{ok,d}=await post('/api/auth/register',{name:$('rName').value,username:$('rUser').value,password:$('rPass').value,phone:$('rPhone').value,role:$('rRole').value});ok?done(d.user):$('err').textContent=d.error};
+</script></body></html>

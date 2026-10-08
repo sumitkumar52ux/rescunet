@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{if((localStorage.getItem("rn-theme")||"dark")==="dark")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}</script>
+<title>RescuNet – Real-Time Alerts. Safer Communities.</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/static/siren.js"></script>
+<script>tailwind.config={theme:{extend:{colors:{navy:'#0B192C',ink:'#0F2A4A',brand:'#1E6FE0',alert:'#E53E3E',safe:'#38A169'}}}}</script>
+<style>
+  body{background:#F1F5FC;color:#0F2A4A;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Devanagari",Roboto,sans-serif}
+  .card{background:#fff;border:1px solid #E3EAF6;border-radius:16px;box-shadow:0 2px 10px rgba(15,42,74,.05)}
+  .nav a{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;cursor:pointer;color:#3b4f6b;font-weight:500}
+  .nav a:hover{background:#EAF1FF}.nav a.active{background:#E3EDFF;color:#1E6FE0;font-weight:700}
+  .view{display:none}.view.active{display:block}
+  @keyframes pulseRing{0%{box-shadow:0 0 0 0 rgba(229,62,62,.55)}100%{box-shadow:0 0 0 30px rgba(229,62,62,0)}}
+  .sos{animation:pulseRing 1.8s infinite}
+  @media(prefers-reduced-motion:reduce){.sos{animation:none}}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.nav a:focus-visible,a:focus-visible{outline:3px solid #1E6FE0;outline-offset:2px}
+  .hero{position:relative;overflow:hidden;border-radius:16px;min-height:320px;display:flex;align-items:center;color:#fff;
+    background:#0B192C url('/static/hero.jpg') right center/cover no-repeat}
+  .hero::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#0B192C 0%,rgba(11,25,44,.9) 30%,rgba(11,25,44,.35) 60%,rgba(11,25,44,0) 80%)}
+  @media(max-width:768px){.hero{min-height:380px;background-position:72% center}.hero::before{background:linear-gradient(180deg,rgba(11,25,44,.92) 0%,rgba(11,25,44,.75) 55%,rgba(11,25,44,.35) 100%)}}
+  .map{height:100%;min-height:20rem;border-radius:12px;z-index:0}
+  .leaflet-container{font:inherit;background:#dfe7f3}
+  input,select,textarea{background:#fff;border:1px solid #CBD7EC;border-radius:8px;padding:8px;width:100%}
+  /* ===== Dark emergency theme (default): navy / alert red / safe green ===== */
+  html.dark body{background:#0B192C;color:#e6edf5}
+  html.dark .card{background:#13294B;border-color:rgba(255,255,255,.1);box-shadow:none}
+  html.dark .bg-white{background:#0F2140!important}
+  html.dark [class*="E3EAF6"]{border-color:rgba(255,255,255,.1)!important}
+  html.dark .text-slate-500,html.dark .text-slate-600,html.dark .text-slate-700{color:#a9b8cf!important}
+  html.dark .bg-slate-50{background:#0B192C!important}
+  html.dark .bg-slate-100{background:rgba(255,255,255,.1)!important}
+  html.dark .bg-slate-200{background:rgba(255,255,255,.15)!important}
+  html.dark .border-slate-200,html.dark .border-slate-300{border-color:rgba(255,255,255,.2)!important}
+  html.dark .divide-slate-100>*+*{border-color:rgba(255,255,255,.1)!important}
+  html.dark .nav a{color:#c3d0e4}html.dark .nav a:hover{background:rgba(255,255,255,.08)}
+  html.dark .nav a.active{background:rgba(30,111,224,.25);color:#8fbcff}
+  html.dark #mnav a.bg-blue-100{background:rgba(30,111,224,.3)!important}
+  html.dark input,html.dark select,html.dark textarea{background:#0B192C;border-color:rgba(255,255,255,.25);color:#fff}
+  html.dark .bg-green-100{background:rgba(56,161,105,.22)!important}html.dark .text-green-700{color:#9ae6b4!important}
+  html.dark .bg-yellow-100{background:rgba(236,201,75,.2)!important}html.dark .text-yellow-700{color:#faf089!important}
+  html.dark .bg-orange-100{background:rgba(237,137,54,.25)!important}html.dark .text-orange-700{color:#fbd38d!important}
+  html.dark .bg-red-100{background:rgba(229,62,62,.25)!important}html.dark .text-red-700{color:#feb2b2!important}
+  html.dark .bg-blue-100{background:rgba(30,111,224,.25)!important}html.dark .text-blue-800{color:#9cc4ff!important}
+  html.dark .bg-red-50{background:rgba(229,62,62,.15)!important}html.dark .border-red-200{border-color:rgba(229,62,62,.5)!important}
+  html.dark .bg-yellow-50{background:rgba(236,201,75,.12)!important}html.dark .border-yellow-200{border-color:rgba(236,201,75,.45)!important}
+  html.dark .bg-blue-50{background:rgba(30,111,224,.15)!important}html.dark .border-blue-200{border-color:rgba(30,111,224,.5)!important}
+  html.dark .bg-orange-50{background:rgba(237,137,54,.15)!important}html.dark .border-orange-200{border-color:rgba(237,137,54,.5)!important}
+  html.dark .from-white{--tw-gradient-from:#13294B!important}html.dark .to-red-50{--tw-gradient-to:#3a1a2e!important}
+  html.dark .leaflet-tile-pane{filter:brightness(.72) saturate(.8) contrast(1.05)}
+  html.dark .leaflet-container{background:#0B192C}
+</style>
+</head>
+<body>
+<div class="flex min-h-screen">
+
+<!-- ===== Sidebar ===== -->
+<aside id="side" class="hidden md:flex flex-col w-60 shrink-0 bg-white border-r border-[#E3EAF6] p-4 sticky top-0 h-screen">
+  <div class="flex items-center gap-2 mb-6">
+    <svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 3c-8 0-14 6-14 13.500C10 27 24 40 24 40s14-13 14-23.500C38 9 32 3 24 3z" fill="#E53E3E"/><circle cx="24" cy="16" r="6" fill="#fff"/><path d="M4 41c5-4 9 4 14 0s9 4 14 0 9 4 12 0" fill="none" stroke="#1E6FE0" stroke-width="3.500" stroke-linecap="round"/></svg>
+    <div class="text-2xl font-extrabold">Rescu<span class="text-brand">Net</span></div>
+  </div>
+  <nav class="nav space-y-1" id="nav">
+    <a data-v="overview" tabindex="0" class="active"><span>▦</span><span data-i18n="nav_dash">Dashboard</span></a>
+    <a data-v="map" tabindex="0"><span>🗺</span><span data-i18n="nav_map">Live Map</span></a>
+    <a data-v="alerts" tabindex="0"><span>🔔</span><span data-i18n="nav_alerts">Alerts</span><span id="nBadge" class="ml-auto hidden text-xs bg-alert text-white rounded-full px-2">0</span></a>
+    <a data-v="teams" tabindex="0"><span>👥</span><span data-i18n="nav_teams">Rescue Teams</span></a>
+    <a data-v="community" tabindex="0"><span>🤝</span><span data-i18n="nav_comm">Community</span></a>
+    <a data-v="help" tabindex="0"><span>📞</span><span data-i18n="nav_help">Helplines</span></a>
+    <a data-v="settings" tabindex="0"><span>⚙</span><span data-i18n="nav_set">Settings</span></a>
+  </nav>
+  <div class="mt-auto text-xs text-slate-500">Real-Time Alerts.<br>Safer Communities.</div>
+</aside>
+
+<div class="flex-1 min-w-0">
+  <!-- ===== Top bar (kept to the essentials) ===== -->
+  <header class="flex items-center justify-between gap-3 px-4 md:px-8 py-3 bg-white border-b border-[#E3EAF6] sticky top-0 z-30">
+    <div class="md:hidden font-extrabold text-xl">Rescu<span class="text-brand">Net</span></div>
+    <div class="hidden md:block text-slate-500 text-sm">Prepared Today, Safer Tomorrow</div>
+    <div class="flex flex-wrap items-center justify-end gap-2 text-sm">
+      <span id="conn" class="px-3 py-1 rounded-full bg-slate-100">…</span>
+      <button id="locBtn" class="px-3 py-1 rounded-full border border-brand text-brand hover:bg-brand hover:text-white" data-i18n="loc_enable">📍 Enable local alerts</button>
+      <button id="langBtn" class="px-3 py-1 rounded-full border border-slate-300" aria-label="Language">हिं</button>
+      <button id="themeBtn" class="px-3 py-1 rounded-full border border-slate-300" aria-label="Toggle light/dark theme">☀/🌙</button>
+      <span id="authBox" class="flex items-center gap-2"></span>
+    </div>
+  </header>
+  <div id="offBanner" class="hidden px-4 md:px-8 py-2 bg-yellow-400 text-black text-sm font-semibold"></div>
+  <nav id="mnav" class="md:hidden flex overflow-x-auto gap-1 bg-white border-b border-[#E3EAF6] px-2 py-1 text-sm">
+    <a data-v="overview" class="px-3 py-2 whitespace-nowrap">Dashboard</a><a data-v="map" class="px-3 py-2 whitespace-nowrap">Live Map</a><a data-v="alerts" class="px-3 py-2 whitespace-nowrap">Alerts</a><a data-v="teams" class="px-3 py-2 whitespace-nowrap">Teams</a><a data-v="community" class="px-3 py-2 whitespace-nowrap">Community</a><a data-v="help" class="px-3 py-2 whitespace-nowrap">Helplines</a><a data-v="settings" class="px-3 py-2 whitespace-nowrap">Settings</a>
+  </nav>
+
+  <main class="p-4 md:p-8 max-w-[1500px] mx-auto w-full">
+
+  <!-- ===== DASHBOARD ===== -->
+  <section id="v-overview" class="view active space-y-6">
+    <div class="hero" role="img" aria-label="Rescue team in a boat reaching a flooded village at sunset">
+      <div class="relative p-6 md:p-10 max-w-xl">
+        <div class="text-4xl md:text-5xl font-extrabold tracking-tight">Rescu<span style="color:#5aa2ff">Net</span></div>
+        <h2 class="mt-2 text-xl md:text-2xl font-bold" data-i18n="hero_title">Real-Time Alerts. Safer Communities.</h2>
+        <p class="mt-2 text-slate-200" data-i18n="hero_sub">A community-driven platform for flood monitoring, early warnings and faster rescue response.</p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <button id="heroSos" class="bg-alert hover:bg-red-600 text-white font-extrabold px-6 py-3 rounded-xl" data-i18n="hero_sos">🚨 SEND SOS</button>
+          <button id="heroVol" class="bg-safe hover:bg-green-600 text-white font-extrabold px-6 py-3 rounded-xl" data-i18n="hero_vol">🤝 BECOME A VOLUNTEER</button>
+        </div>
+        <div class="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-200">
+          <span data-i18n="hero_f1">🛡 Monitor flood zones</span><span data-i18n="hero_f2">👥 Alert communities</span><span data-i18n="hero_f3">🛟 Save lives</span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <h1 class="text-3xl font-extrabold" data-i18n="dash_title">Dashboard / Overview</h1>
+      <p class="text-slate-600" data-i18n="dash_sub">A complete view of the flood situation, live updates and quick access to all features.</p>
+    </div>
+    <div id="nearBox" class="hidden card p-3 text-sm"></div>
+    <div class="grid lg:grid-cols-3 gap-6 items-stretch">
+      <div class="card p-6 text-center flex flex-col items-center bg-gradient-to-b from-white to-red-50">
+        <button id="sosBtn" class="sos w-36 h-36 rounded-full bg-alert hover:bg-red-600 text-white text-4xl font-extrabold" aria-label="Send disaster SOS">SOS</button>
+        <div class="mt-4 font-bold text-lg" data-i18n="sos_btn">🚨 SEND DISASTER SOS</div>
+        <p class="text-sm text-slate-600" data-i18n="sos_sub">Private alert to nearby volunteers and the control room. Login required.</p>
+        <button id="volBtn" class="mt-4 bg-safe hover:bg-green-600 text-white font-bold px-5 py-2 rounded-lg" data-i18n="vol_btn">🤝 VOLUNTEER REGISTER</button>
+        <div id="mySos" class="hidden"></div>
+      </div>
+      <div class="card p-3 lg:col-span-2 min-h-[20rem]"><div id="mapMini" class="map"></div></div>
+    </div>
+    <div class="grid sm:grid-cols-4 gap-4" id="stats"></div>
+    <div class="grid lg:grid-cols-2 gap-6">
+      <div class="card p-5">
+        <h2 class="text-xl font-bold mb-1" data-i18n="h_sensors">Live river sensors</h2>
+        <p class="text-sm text-slate-500 mb-4" data-i18n="sensors_sub">Warning 14.0 m · Danger 15.0 m · read-only (managed by officials)</p>
+        <div id="sensors" class="space-y-4"></div>
+      </div>
+      <div class="card p-5 overflow-x-auto">
+        <h2 class="text-xl font-bold mb-4" data-i18n="h_camps">Relief camps</h2>
+        <table class="w-full text-sm min-w-[520px]"><thead class="text-left text-slate-500"><tr><th class="pb-2" data-i18n="th_camp">Camp</th><th class="pb-2" data-i18n="th_cap">Capacity</th><th class="pb-2" data-i18n="th_food">Food</th><th class="pb-2" data-i18n="th_med">Medical</th><th class="pb-2" data-i18n="th_dir">Directions</th></tr></thead><tbody id="camps" class="divide-y divide-slate-100"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== LIVE MAP ===== -->
+  <section id="v-map" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="map_title">Live Flood Map</h1>
+    <p class="text-slate-600" data-i18n="map_sub">Track flood-affected areas in real time with colour-coded zones and risk levels.</p>
+    <div class="grid lg:grid-cols-4 gap-6">
+      <div class="card p-5 h-fit">
+        <h2 class="font-bold mb-3" data-i18n="risk_title">Risk levels</h2>
+        <ul class="space-y-2 text-sm">
+          <li><span class="inline-block w-3 h-3 rounded-full mr-2" style="background:#E53E3E"></span><span data-i18n="risk_high">High Risk</span></li>
+          <li><span class="inline-block w-3 h-3 rounded-full mr-2" style="background:#ED8936"></span><span data-i18n="risk_med">Medium Risk</span></li>
+          <li><span class="inline-block w-3 h-3 rounded-full mr-2" style="background:#ECC94B"></span><span data-i18n="risk_low">Low Risk</span></li>
+          <li><span class="inline-block w-3 h-3 rounded-full mr-2" style="background:#38A169"></span><span data-i18n="risk_safe">Safe Zone</span></li>
+        </ul>
+        <p class="text-xs text-slate-500 mt-4">🆘 SOS · 🚤 Rescue team · ⛺ Relief camp · ℹ Community report</p>
+      </div>
+      <div class="card p-3 lg:col-span-3 h-[70vh]"><div id="mapFull" class="map"></div></div>
+    </div>
+  </section>
+
+  <!-- ===== ALERTS ===== -->
+  <section id="v-alerts" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="alerts_title">Alerts &amp; Notifications</h1>
+    <p class="text-slate-600" data-i18n="alerts_sub">Stay informed with real-time flood alerts, warnings and community updates.</p>
+    <div id="notifs" class="space-y-3 max-w-2xl"></div>
+  </section>
+
+  <!-- ===== TEAMS ===== -->
+  <section id="v-teams" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="teams_title">Rescue Teams</h1>
+    <p class="text-slate-600" data-i18n="teams_sub">Coordinate with local rescue teams and volunteers for faster response and safe evacuation.</p>
+    <div id="teamList" class="grid sm:grid-cols-3 gap-4"></div>
+  </section>
+
+  <!-- ===== COMMUNITY ===== -->
+  <section id="v-community" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="comm_title">Community Volunteers</h1>
+    <p class="text-slate-600" data-i18n="comm_sub">Register as a volunteer to receive nearby SOS alerts, and report flood issues to help your community.</p>
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="card p-5 space-y-3">
+        <h2 class="text-xl font-bold" data-i18n="comm_become">Become a volunteer</h2>
+        <p class="text-sm text-slate-600" data-i18n="comm_become_sub">Create a volunteer account. When someone near you sends an SOS, you are alerted instantly.</p>
+        <a id="volLink" href="/login#register" class="inline-block bg-safe hover:bg-green-600 text-white font-bold px-5 py-2 rounded-lg" data-i18n="comm_reg">Register / Login</a>
+        <p class="text-sm text-slate-500"><span data-i18n="st_vol">Volunteers</span>: <b id="volCount">0</b></p>
+      </div>
+      <div class="card p-5 space-y-3">
+        <h2 class="text-xl font-bold" data-i18n="rep_title">Report a flood issue</h2>
+        <div><label class="text-sm" for="rKind" data-i18n="rep_type">Type</label><select id="rKind"><option value="road_blocked">Road blocked</option><option value="people_stranded">People stranded</option><option value="water_rising">Water rising fast</option><option value="other">Other</option></select></div>
+        <div><label class="text-sm" for="rText" data-i18n="rep_what">What do you see?</label><textarea id="rText" rows="3" placeholder="e.g. Road blocked near River Road"></textarea></div>
+        <button id="rSend" class="bg-brand hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-lg" data-i18n="rep_send">Send report</button>
+        <ul id="reports" class="text-sm space-y-2 pt-2"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== HELPLINES + OFFLINE GUIDANCE ===== -->
+  <section id="v-help" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="help_title">Emergency Helplines</h1>
+    <p class="text-slate-600" data-i18n="help_sub">Tap a number to call. Please verify the numbers for your state before relying on them.</p>
+    <div id="helpList" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
+    <div class="card p-5 max-w-3xl space-y-2">
+      <h2 class="text-xl font-bold" data-i18n="off_card_title">📵 No internet? Use SMS</h2>
+      <p class="text-sm text-slate-600" data-i18n="off_card_body">Send an SMS to the RescuNet number. Write SOS, then medical or food if needed, then your latitude and longitude.</p>
+      <p class="font-mono text-sm">SOS medical 25.61,85.16</p>
+      <p class="text-sm">📱 <span data-i18n="off_number">RescuNet SMS number</span>: <b id="smsNum">—</b></p>
+      <p class="text-xs text-slate-500" data-i18n="off_vol">Volunteers can reply ACCEPT &lt;id&gt;, ONWAY &lt;id&gt;, REACHED &lt;id&gt; by SMS.</p>
+    </div>
+  </section>
+
+  <!-- ===== SETTINGS ===== -->
+  <section id="v-settings" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="nav_set">Settings</h1>
+    <div class="card p-5 max-w-xl space-y-3">
+      <p class="text-sm text-slate-600" data-i18n="set_sound">Alert sound is enabled automatically after your first tap on this page. You can test it here (plays only on your device).</p>
+      <button id="armBtn2" class="border border-safe text-safe hover:bg-safe hover:text-white px-4 py-2 rounded-lg font-semibold" data-i18n="set_test">🔊 Test alert sound</button>
+      <p class="text-sm text-slate-500" data-i18n="set_lock">🔒 The global siren can only be triggered by authorized disaster-management officials. Your SOS is private: it goes to nearby volunteers and the control room, never to the public.</p>
+    </div>
+  </section>
+  </main>
+</div>
+</div>
+
+<!-- Big popup shown to a volunteer when an SOS arrives -->
+<div id="sosPopup" role="alertdialog" aria-live="assertive" class="hidden fixed inset-0 z-[1800] bg-black/75 flex items-center justify-center p-4">
+  <div class="card w-full max-w-lg p-6 border-2 border-alert" style="box-shadow:0 0 0 6px rgba(229,62,62,.35)">
+    <div class="flex justify-between items-center mb-3"><span class="text-xs font-extrabold tracking-widest text-alert" data-i18n="pop_head">🆘 SOS NEARBY · VOLUNTEER ALERT</span><span id="popNav" class="text-xs text-slate-500"></span></div>
+    <div id="popBody"></div>
+    <div id="popBtns" class="flex flex-wrap gap-2 mt-5 items-center"></div>
+  </div>
+</div>
+<button id="sosFab" class="hidden fixed bottom-5 right-5 z-[1700] bg-alert hover:bg-red-600 text-white font-bold px-4 py-3 rounded-full shadow-lg"></button>
+<div id="toasts" class="fixed top-16 left-1/2 -translate-x-1/2 z-[1500] space-y-2 w-[92%] max-w-md"></div>
+
+<!-- SOS modal -->
+<div id="sosModal" class="hidden fixed inset-0 z-[1000] bg-black/60 flex items-center justify-center p-4">
+  <div class="card p-6 w-full max-w-md">
+    <h3 class="text-xl font-bold mb-4" data-i18n="sosm_title">Send SOS</h3>
+    <label class="text-sm" for="urgency" data-i18n="sosm_need">What do you need?</label>
+    <select id="urgency" class="mb-3"><option value="critical_medical">Critical medical emergency</option><option value="stranded_food_needed">Stranded – need food/water</option><option value="general">General help</option></select>
+    <div class="grid grid-cols-2 gap-3 mb-2">
+      <div><label class="text-sm" for="lat">Latitude</label><input id="lat" type="number" step="any"></div>
+      <div><label class="text-sm" for="lng">Longitude</label><input id="lng" type="number" step="any"></div>
+    </div>
+    <p id="geoNote" class="text-xs text-slate-500 mb-4"></p>
+    <div class="flex gap-3"><button id="sosSend" class="flex-1 bg-alert hover:bg-red-600 text-white rounded-lg py-2 font-bold" data-i18n="sosm_send">Send SOS</button><button id="sosCancel" class="flex-1 border border-slate-300 rounded-lg py-2" data-i18n="cancel">Cancel</button></div>
+  </div>
+</div>
+<div id="sosDone" class="hidden fixed inset-0 z-[1000] bg-black/60 flex items-center justify-center p-4">
+  <div class="card p-8 text-center max-w-sm"><div class="text-6xl">✅</div><h3 class="text-2xl font-extrabold text-alert mt-2" data-i18n="sosd_title">Emergency Alert Sent!</h3><p id="sosDoneMsg" class="text-slate-600 mt-2"></p><button id="sosDoneBtn" class="mt-5 bg-brand text-white font-bold px-6 py-2 rounded-lg">OK</button></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const api=async(u,b)=>{try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});return await r.json()}catch(e){return{error:t('net_err','Network error - is the server running?')}}};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- Language: English / Hindi ---------- */
+const HI={nav_dash:'डैशबोर्ड',nav_map:'लाइव नक्शा',nav_alerts:'अलर्ट',nav_teams:'बचाव दल',nav_comm:'समुदाय',nav_help:'हेल्पलाइन',nav_set:'सेटिंग्स',
+ loc_enable:'📍 स्थानीय अलर्ट चालू करें',loc_on:'📍 स्थानीय अलर्ट चालू',dash_title:'डैशबोर्ड / अवलोकन',dash_sub:'बाढ़ की स्थिति, लाइव अपडेट और सभी सुविधाओं तक तुरंत पहुँच।',
+ sos_btn:'🚨 आपदा SOS भेजें',sos_sub:'पास के स्वयंसेवकों और कंट्रोल रूम को निजी अलर्ट। लॉगिन ज़रूरी।',vol_btn:'🤝 स्वयंसेवक बनें',
+ h_sensors:'नदी सेंसर (लाइव)',sensors_sub:'चेतावनी 14.0 मी · खतरा 15.0 मी · केवल देखने के लिए',h_camps:'राहत शिविर',th_camp:'शिविर',th_cap:'क्षमता',th_food:'भोजन',th_med:'दवा',th_dir:'रास्ता',
+ map_title:'लाइव बाढ़ नक्शा',map_sub:'रंग-कोडित ज़ोन और जोखिम स्तर के साथ बाढ़ प्रभावित इलाके देखें।',risk_title:'जोखिम स्तर',risk_high:'उच्च जोखिम',risk_med:'मध्यम जोखिम',risk_low:'कम जोखिम',risk_safe:'सुरक्षित क्षेत्र',
+ alerts_title:'अलर्ट और सूचनाएँ',alerts_sub:'बाढ़ की चेतावनियाँ और अपडेट रियल-टाइम में पाएँ।',teams_title:'बचाव दल',teams_sub:'तेज़ मदद और सुरक्षित निकासी के लिए स्थानीय बचाव दलों से जुड़ें।',
+ comm_title:'सामुदायिक स्वयंसेवक',comm_sub:'पास के SOS अलर्ट पाने के लिए स्वयंसेवक बनें और बाढ़ की समस्याएँ बताएँ।',comm_become:'स्वयंसेवक बनें',comm_become_sub:'स्वयंसेवक खाता बनाएँ। पास में SOS आते ही आपको तुरंत अलर्ट मिलेगा।',comm_reg:'रजिस्टर / लॉगिन',
+ rep_title:'बाढ़ की समस्या बताएँ',rep_type:'प्रकार',rep_what:'आप क्या देख रहे हैं?',rep_send:'रिपोर्ट भेजें',
+ help_title:'आपातकालीन हेल्पलाइन',help_sub:'कॉल करने के लिए नंबर दबाएँ। उपयोग से पहले अपने राज्य के नंबर जाँच लें।',
+ off_card_title:'📵 इंटरनेट नहीं है? SMS करें',off_card_body:'RescuNet के नंबर पर SMS भेजें: SOS लिखें, ज़रूरत हो तो medical या food, फिर अपना अक्षांश और देशांतर।',off_number:'RescuNet SMS नंबर',off_vol:'स्वयंसेवक SMS से ACCEPT <id>, ONWAY <id>, REACHED <id> भेज सकते हैं।',
+ set_sound:'इस पेज पर पहली बार टैप करते ही अलर्ट की आवाज़ अपने आप चालू हो जाती है। यहाँ टेस्ट कर सकते हैं (सिर्फ़ आपके डिवाइस पर बजेगी)।',set_test:'🔊 अलर्ट आवाज़ टेस्ट करें',
+ set_lock:'🔒 वैश्विक सायरन केवल अधिकृत आपदा-प्रबंधन अधिकारी ही बजा सकते हैं। आपका SOS निजी है: वह सिर्फ़ पास के स्वयंसेवकों और कंट्रोल रूम तक जाता है।',
+ pop_head:'🆘 पास में SOS · स्वयंसेवक अलर्ट',sosm_title:'SOS भेजें',sosm_need:'आपको क्या चाहिए?',sosm_send:'SOS भेजें',cancel:'रद्द करें',sosd_title:'आपातकालीन अलर्ट भेज दिया गया!',
+ st_river:'सबसे ऊँचा नदी स्तर',st_high:'उच्च जोखिम क्षेत्र',st_teams:'ड्यूटी पर दल',st_vol:'स्वयंसेवक',
+ s_normal:'सामान्य',s_watch:'निगरानी',s_warning:'चेतावनी',s_critical:'खतरा',k_ok:'पर्याप्त',k_low:'कम',k_crit:'गंभीर',
+ rising:'बढ़ रहा',falling:'घट रहा',steady:'स्थिर',updated:'अपडेट',no_reading:'अभी रीडिंग नहीं',warn_at:'चेतावनी',danger_at:'खतरा',
+ w_full:'भरा हुआ',w_high:'अधिक भीड़',w_lowfood:'भोजन कम',w_lowmed:'दवा कम',directions:'🧭 रास्ता',
+ u_med:'🩺 गंभीर चिकित्सा',u_food:'🍞 फँसे हैं – भोजन चाहिए',u_gen:'🆘 सामान्य मदद',
+ st_open:'स्वयंसेवक का इंतज़ार',st_acc:'स्वीकार किया',st_way:'रास्ते में',st_reach:'पहुँच गए',st_res:'समाप्त',
+ my_open:'🆘 SOS भेज दिया गया। स्वयंसेवक के स्वीकार करने का इंतज़ार…',my_acc:'🙋 {n} ने आपका SOS स्वीकार किया।',my_way:'🚗 {n} आपकी ओर आ रहे हैं।',my_reach:'✅ {n} आपके पास पहुँच गए हैं।',my_safe:'मैं सुरक्षित हूँ – SOS बंद करें',
+ my_gps:'📍 सटीक GPS लोकेशन कंट्रोल रूम और पास के स्वयंसेवकों को भेजी गई',
+ b_accept:'✋ स्वीकार करें और मदद करें',b_way:'🚗 मैं निकल रहा हूँ',b_reach:'✅ मैं पहुँच गया',b_later:'बाद में',b_close:'बंद करें',b_maps:'🗺 नक्शे में खोलें',taken:'कोई और स्वयंसेवक पहले से मदद कर रहा है।',wait_safe:'व्यक्ति के सुरक्षित होने की पुष्टि का इंतज़ार है।',
+ hero_title:'रियल-टाइम अलर्ट। सुरक्षित समुदाय।',hero_sub:'बाढ़ की निगरानी, पूर्व चेतावनी और तेज़ बचाव के लिए एक सामुदायिक प्लेटफ़ॉर्म।',hero_sos:'🚨 SOS भेजें',hero_vol:'🤝 स्वयंसेवक बनें',hero_f1:'🛡 बाढ़ क्षेत्रों की निगरानी',hero_f2:'👥 समुदायों को अलर्ट',hero_f3:'🛟 जान बचाएँ',
+ off_title:'इंटरनेट नहीं है।',off_body:'इसके बजाय SMS भेजें:',off_nonum:'SMS नंबर सेट नहीं है',
+ pri_high:'उच्च प्राथमिकता',pri_medium:'मध्यम',pri_low:'कम',away:'दूर',
+ near_a:'📍 आपका इलाका: सबसे नज़दीकी नदी सेंसर',near_b:'सामान्य',away_km:'किमी दूर',outside:'अलर्ट दायरे से बाहर'};
+const EN={};
+let LANG='en';try{LANG=localStorage.getItem('rn-lang')||'en'}catch(e){}
+const t=(k,en)=>{if(!(k in EN)&&en!==undefined)EN[k]=en;return(LANG==='hi'&&HI[k])||EN[k]||en||k};
+function applyLang(){
+  document.documentElement.lang=LANG;
+  document.querySelectorAll('[data-i18n]').forEach(e=>{const k=e.dataset.i18n;if(!(k in EN))EN[k]=e.innerHTML;e.innerHTML=(LANG==='hi'&&HI[k])||EN[k]});
+  $('langBtn').textContent=LANG==='hi'?'EN':'हिं';
+  if(S.loc)$('locBtn').textContent=t('loc_on','📍 Local alerts ON');
+}
+$('langBtn').onclick=()=>{LANG=LANG==='hi'?'en':'hi';try{localStorage.setItem('rn-lang',LANG)}catch(e){}applyLang();if(S.ready)renderAll();updateOffline()};
+
+/* ---------- Navigation ---------- */
+let maps={};
+function show(v){
+  document.querySelectorAll('.view').forEach(e=>e.classList.toggle('active',e.id==='v-'+v));
+  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.v===v));
+  document.querySelectorAll('#mnav a').forEach(a=>a.classList.toggle('bg-blue-100',a.dataset.v===v));
+  if(v==='alerts'){unread=0;renderBadge()}
+  setTimeout(()=>Object.values(maps).forEach(m=>m.invalidateSize()),50);
+}
+document.querySelectorAll('[data-v]').forEach(a=>{a.onclick=()=>show(a.dataset.v);a.onkeydown=e=>{if(e.key==='Enter')show(a.dataset.v)}});
+
+/* ---------- Maps (OpenStreetMap tiles: free, no API key) ---------- */
+const RISK={high:'#E53E3E',medium:'#ED8936',low:'#ECC94B',safe:'#38A169'};
+const CENTER=[25.60,85.15];
+const tiles={};let layers={};
+function makeMap(id){
+  const m=L.map(id,{scrollWheelZoom:false}).setView(CENTER,11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(m);
+  maps[id]=m;layers[id]={zones:L.layerGroup().addTo(m),camps:L.layerGroup().addTo(m),teams:L.layerGroup().addTo(m),sos:L.layerGroup().addTo(m),reports:L.layerGroup().addTo(m)};
+}
+const dot=(c,tx)=>L.divIcon({className:'',html:`<div style="background:${c};color:#fff;border:2px solid #fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 1px 4px #0006">${tx}</div>`,iconSize:[26,26]});
+const dirLink=(lat,lng)=>`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+function drawMaps(){
+  Object.keys(maps).forEach(id=>{
+    const G=layers[id];Object.values(G).forEach(g=>g.clearLayers());
+    S.zones.forEach(z=>L.circle([z.lat,z.lng],{radius:z.radius,color:RISK[z.risk],fillColor:RISK[z.risk],fillOpacity:.35,weight:2}).bindPopup(`<b>${esc(z.name)}</b><br>${z.risk}`).addTo(G.zones));
+    S.camps.forEach(c=>L.marker([c.lat,c.lng],{icon:dot('#2F855A','⛺')}).bindPopup(`<b>${esc(c.name)}</b><br>${c.occupied}/${c.capacity}<br><a target="_blank" rel="noopener" href="${dirLink(c.lat,c.lng)}">${t('directions','🧭 Directions')}</a>`).addTo(G.camps));
+    S.teams.forEach(tm=>L.marker([tm.lat,tm.lng],{icon:dot('#1E6FE0','🚤')}).bindPopup(`<b>${esc(tm.name)}</b><br>${esc(tm.status)} · ${tm.distance_km} km`).addTo(G.teams));
+    S.alerts.forEach(a=>L.marker([a.latitude,a.longitude],{icon:dot('#E53E3E','!')}).bindPopup(`SOS: ${esc(urg(a.urgency_level))}`).addTo(G.sos));
+    S.reports.filter(r=>r.latitude!=null).forEach(r=>L.marker([r.latitude,r.longitude],{icon:dot('#ED8936','i')}).bindPopup(esc(r.text)).addTo(G.reports));
+  });
+}
+
+/* ---------- State + labels ---------- */
+const S={mySos:null,loc:null,near:null,me:null,ready:false,sms_number:'',sensors:[],camps:[],alerts:[],zones:[],teams:[],reports:[],notifications:[],volunteers:0};
+let unread=0,socketEver=false;
+const urg=k=>({critical_medical:t('u_med','🩺 Critical medical'),stranded_food_needed:t('u_food','🍞 Stranded – food needed'),general:t('u_gen','🆘 General help')}[k]);
+const stTxt=k=>({open:t('st_open','Waiting for a volunteer'),accepted:t('st_acc','Accepted'),on_the_way:t('st_way','On the way'),reached:t('st_reach','Reached the victim'),resolved:t('st_res','Resolved')}[k]);
+const PRI_CLS={high:'bg-red-100 text-red-700',medium:'bg-orange-100 text-orange-700',low:'bg-blue-100 text-blue-800'};
+const priBadge=p=>`<span class="text-xs px-2 py-1 rounded-full font-bold ${PRI_CLS[p]||PRI_CLS.low}">${t('pri_'+p,{high:'HIGH priority',medium:'MEDIUM',low:'LOW'}[p]||p)}</span>`;
+const levelColor=l=>l>=15?'#E53E3E':l>=14?'#ED8936':l>=12?'#ECC94B':'#38A169';
+const stockLabel=pct=>pct<25?['Critical','bg-red-100 text-red-700',t('k_crit','Critical')]:pct<50?['Low','bg-yellow-100 text-yellow-700',t('k_low','Low')]:['Sufficient','bg-green-100 text-green-700',t('k_ok','Sufficient')];
+
+function renderBadge(){const b=$('nBadge');b.textContent=unread;b.classList.toggle('hidden',!unread)}
+function renderStats(){
+  const high=S.zones.filter(z=>z.risk==='high').length,top=Math.max(...S.sensors.map(s=>s.current_level),0);
+  const items=[['🌊',t('st_river','Highest river level'),top.toFixed(1)+' m'],['🟥',t('st_high','High-risk zones'),high],['🚤',t('st_teams','Teams on duty'),S.teams.length],['🤝',t('st_vol','Volunteers'),S.volunteers]];
+  $('stats').innerHTML=items.map(([i,l,v])=>`<div class="card p-4"><div class="text-2xl">${i}</div><div class="text-2xl font-extrabold">${v}</div><div class="text-sm text-slate-500">${l}</div></div>`).join('');
+  $('volCount').textContent=S.volunteers;
+}
+function renderSensors(){
+  $('sensors').innerHTML=S.sensors.map(s=>{
+    const lvl=s.current_level,col=levelColor(lvl),pct=Math.min(100,lvl/18*100);
+    const disp=s.state==='normal'&&lvl>=12?'watch':s.state;
+    const badge={normal:'bg-green-100 text-green-700',watch:'bg-yellow-100 text-yellow-700',warning:'bg-orange-100 text-orange-700',critical:'bg-red-100 text-red-700'}[disp];
+    const lab={normal:t('s_normal','Normal'),watch:t('s_watch','Watch'),warning:t('s_warning','Warning'),critical:t('s_critical','Critical')}[disp];
+    const tr=s.trend>=.2?`<span class="text-red-500 font-semibold">▲ +${s.trend.toFixed(1)} m ${t('rising','rising')}</span>`:s.trend<=-.2?`<span class="text-green-500 font-semibold">▼ ${s.trend.toFixed(1)} m ${t('falling','falling')}</span>`:`<span class="text-slate-500">● ${t('steady','steady')}</span>`;
+    return `<div class="rounded-xl bg-slate-50 border border-slate-200 p-4">
+      <div class="flex justify-between mb-1"><b>${esc(s.name)}</b><span class="text-xs px-2 py-1 rounded-full ${badge}">${lab}</span></div>
+      <div class="flex items-end justify-between"><div class="text-3xl font-extrabold">${lvl.toFixed(1)} m</div><div class="text-sm">${tr}</div></div>
+      <div class="relative h-2 rounded bg-slate-200 my-3"><div class="h-2 rounded" style="width:${pct}%;background:${col}"></div>
+        <span class="absolute h-4 w-px bg-orange-400" style="top:-4px;left:${14/18*100}%"></span><span class="absolute h-4 w-px bg-red-500" style="top:-4px;left:${15/18*100}%"></span></div>
+      <div class="text-xs text-slate-500">${t('updated','Updated')}: ${esc(s.updated_at?s.updated_at.slice(11):t('no_reading','no reading yet'))} · ${t('warn_at','Warning')} 14 m · ${t('danger_at','Danger')} 15 m</div></div>`}).join('');
+}
+function campWarnings(c){
+  const p=Math.round(c.occupied/c.capacity*100),w=[];
+  if(p>=90)w.push(['bg-red-100 text-red-700',t('w_full','FULL')+' '+p+'%']);else if(p>=80)w.push(['bg-orange-100 text-orange-700',t('w_high','High occupancy')+' '+p+'%']);
+  if(c.food_stock<25)w.push(['bg-red-100 text-red-700',t('w_lowfood','Low food')]);
+  if(c.medical_stock<25)w.push(['bg-red-100 text-red-700',t('w_lowmed','Low medicine')]);
+  return w.map(([c2,tx])=>`<span class="inline-block text-[11px] px-2 py-0.5 rounded-full font-bold mr-1 mt-1 ${c2}">⚠ ${tx}</span>`).join('');
+}
+function renderCamps(){
+  $('camps').innerHTML=S.camps.map(c=>{
+    const p=Math.round(c.occupied/c.capacity*100),b=p>=90?'#E53E3E':p>=70?'#ECC94B':'#38A169',f=stockLabel(c.food_stock),m=stockLabel(c.medical_stock);
+    return `<tr><td class="py-3 pr-2 font-semibold">${esc(c.name)}<div>${campWarnings(c)}</div></td>
+    <td class="py-3 pr-2"><div class="text-xs mb-1">${c.occupied}/${c.capacity} (${p}%)</div><div class="h-2 w-28 rounded bg-slate-200"><div class="h-2 rounded" style="width:${p}%;background:${b}"></div></div></td>
+    <td class="py-3 pr-2"><span class="px-2 py-1 rounded-full text-xs ${f[1]}">${f[2]} · ${c.food_stock}%</span></td>
+    <td class="py-3 pr-2"><span class="px-2 py-1 rounded-full text-xs ${m[1]}">${m[2]} · ${c.medical_stock}%</span></td>
+    <td class="py-3"><a class="text-brand underline whitespace-nowrap" target="_blank" rel="noopener" href="${dirLink(c.lat,c.lng)}">${t('directions','🧭 Directions')}</a></td></tr>`}).join('');
+}
+const NSTYLE={danger:['⚠️','bg-red-50 border-red-200'],warning:['🌧️','bg-yellow-50 border-yellow-200'],info:['ℹ️','bg-blue-50 border-blue-200']};
+function renderNotifs(){
+  $('notifs').innerHTML=S.notifications.map(n=>{const[i,c]=NSTYLE[n.type]||NSTYLE.info;
+    return `<div class="rounded-xl border p-4 ${c}"><div class="flex justify-between"><b>${i} ${esc(n.title)}</b><span class="text-xs text-slate-500">${esc((n.created_at||'').slice(11,16))}</span></div><div class="text-sm text-slate-700">${esc(n.body)}</div></div>`}).join('');
+}
+function renderTeams(){
+  $('teamList').innerHTML=S.teams.map(tm=>`<div class="card p-4"><div class="font-bold">👥 ${esc(tm.name)}</div><div class="text-sm text-green-700">● ${esc(tm.status)}</div><div class="text-sm text-slate-500">${tm.distance_km} km</div></div>`).join('');
+  $('reports').innerHTML=S.reports.map(r=>`<li class="rounded-lg bg-orange-50 border border-orange-200 p-2">${esc(r.text)}</li>`).join('');
+}
+const HELP=[['112','National Emergency Number','राष्ट्रीय आपातकालीन नंबर'],['108','Ambulance','एम्बुलेंस'],['101','Fire','दमकल'],['100','Police','पुलिस'],
+  ['1078','NDMA Disaster Helpline','आपदा हेल्पलाइन (NDMA)'],['1070','State Disaster Control Room','राज्य आपदा नियंत्रण कक्ष'],['1077','District Control Room','ज़िला नियंत्रण कक्ष'],['011-24363260','NDRF Control Room','NDRF कंट्रोल रूम']];
+function renderHelp(){
+  $('helpList').innerHTML=HELP.map(([n,en,hi])=>`<a href="tel:${n.replace(/-/g,'')}" class="card p-4 block hover:border-brand"><div class="text-2xl font-extrabold text-brand">📞 ${n}</div><div class="text-sm text-slate-600">${LANG==='hi'?hi:en}</div></a>`).join('');
+  $('smsNum').textContent=S.sms_number||'—';
+}
+function renderNear(){
+  const n=S.near,el=$('nearBox');if(!n){el.classList.add('hidden');return}
+  el.classList.remove('hidden');
+  const lab={normal:t('s_normal','Normal'),warning:t('s_warning','Warning'),critical:t('s_critical','Critical')}[n.state];
+  el.innerHTML=`${t('near_a','📍 Your area: nearest river sensor')}: <b>${esc(n.name)}</b> (${n.distance_km} ${t('away_km','km away')}) · ${n.level.toFixed(1)} m · <b>${lab}</b>${n.in_range?'':' · '+t('outside','outside its alert radius')}`;
+}
+function renderAuth(){
+  const m=S.me;
+  $('authBox').innerHTML=m?`<span class="px-3 py-1 rounded-full bg-blue-100 text-blue-800">${esc(m.name)} · ${esc(m.role)}</span>${(m.role==='admin'||m.role==='camp_manager')?`<a href="/admin" class="px-3 py-1 rounded-full bg-alert text-white font-semibold">${m.role==='admin'?'Admin panel':'Camp panel'}</a>`:''}<button id="logoutBtn" class="px-3 py-1 rounded-full border border-slate-300">Logout</button>`
+    :'<a href="/login" class="px-3 py-1 rounded-full bg-brand text-white font-semibold">Login / Register</a>';
+  if($('logoutBtn'))$('logoutBtn').onclick=async()=>{await api('/api/auth/logout');location.reload()};
+  $('volLink').classList.toggle('hidden',!!m);
+}
+function renderAll(){renderAuth();renderStats();renderSensors();renderCamps();renderNotifs();renderTeams();renderHelp();renderMySos();renderNear();renderSos();drawMaps()}
+
+/* ---------- Toasts ---------- */
+function toast(msg,kind){
+  const c={danger:'bg-red-600 text-white',warn:'bg-yellow-400 text-black',info:'bg-blue-600 text-white'}[kind||'info'];
+  const d=document.createElement('div');d.className='rounded-xl px-4 py-3 shadow-lg text-sm font-semibold '+c;d.setAttribute('role','alert');d.textContent=msg;
+  $('toasts').appendChild(d);setTimeout(()=>d.remove(),12000);
+}
+
+/* ---------- Victim: live SOS tracker (hidden unless an SOS is active) ---------- */
+function renderMySos(){
+  const el=$('mySos'),a=S.mySos;
+  if(!a){el.className='hidden';el.innerHTML='';return}
+  const n=a.volunteer_name||'';
+  const txt={open:t('my_open','🆘 SOS sent. Waiting for a volunteer to accept…'),accepted:t('my_acc','🙋 {n} accepted your SOS.').replace('{n}',n),on_the_way:t('my_way','🚗 {n} is on the way to you.').replace('{n}',n),reached:t('my_reach','✅ {n} has reached your location.').replace('{n}',n)}[a.status]||'';
+  el.className='mt-5 w-full text-left rounded-xl border p-3 text-sm bg-yellow-50 border-yellow-200 space-y-2';
+  el.innerHTML=`<div class="font-bold">${esc(txt)}</div>
+    <div class="text-xs text-slate-500">${t('my_gps','📍 Exact GPS location sent to the control room and nearby volunteers')}: ${a.latitude.toFixed(5)}, ${a.longitude.toFixed(5)}${a.accuracy_m!=null?' (±'+a.accuracy_m+' m)':''}</div>
+    <button id="safeBtn" class="px-3 py-1 rounded-lg bg-safe text-white font-semibold">${t('my_safe',"I'm safe – close SOS")}</button>`;
+  $('safeBtn').onclick=async()=>{const r=await api(`/api/alerts/${a.id}/safe`);if(r.error)return toast(r.error,'danger');S.mySos=null;renderMySos()};
+}
+
+/* ---------- Volunteer: big SOS popup (priority sorted) ---------- */
+const isVol=()=>!!(S.me&&S.me.role==='volunteer');
+const PRI_ORDER={high:0,medium:1,low:2};
+const liveSos=()=>isVol()?S.alerts.filter(a=>a.status!=='resolved').sort((a,b)=>(PRI_ORDER[a.priority]??2)-(PRI_ORDER[b.priority]??2)||b.id-a.id):[];
+let popIdx=0;
+function ping(){
+  try{const c=new(window.AudioContext||window.webkitAudioContext)();[0,.25].forEach(tm=>{const o=c.createOscillator(),g=c.createGain();o.frequency.value=880;g.gain.value=.2;o.connect(g);g.connect(c.destination);o.start(c.currentTime+tm);o.stop(c.currentTime+tm+.15)})}catch(e){}
+  if(navigator.vibrate)navigator.vibrate([300,150,300]);
+}
+function openSosPopup(id){const l=liveSos(),i=l.findIndex(a=>a.id===id);popIdx=i>-1?i:0;$('sosPopup').classList.remove('hidden');renderSos()}
+function closeSosPopup(){$('sosPopup').classList.add('hidden');renderSos()}
+function popNav(d){const l=liveSos();if(!l.length)return;popIdx=(popIdx+d+l.length)%l.length;renderSos()}
+function renderSos(){
+  const l=liveSos(),pop=$('sosPopup'),fab=$('sosFab');
+  if(!l.length){pop.classList.add('hidden');fab.classList.add('hidden');return}
+  if(popIdx>=l.length)popIdx=l.length-1;
+  const open=!pop.classList.contains('hidden');
+  fab.classList.toggle('hidden',open);fab.textContent=`🆘 Active SOS (${l.length})`;
+  if(!open)return;
+  const a=l[popIdx],mine=a.volunteer_id===S.me.id,taken=a.volunteer_id&&!mine;
+  $('popNav').textContent=l.length>1?`${popIdx+1} / ${l.length}`:'';
+  $('popBody').innerHTML=`<div class="mb-2">${priBadge(a.priority)}</div><div class="text-3xl font-extrabold mb-1">${urg(a.urgency_level)}</div>
+    <div class="text-lg font-semibold">${esc(a.name)}${mine&&a.phone?' · 📞 '+esc(a.phone):''}</div>
+    <div class="text-slate-500 mt-1">${a.distance_km!=null?'<b>'+a.distance_km+' km</b> '+t('away','away')+' · ':''}${a.latitude.toFixed(5)}, ${a.longitude.toFixed(5)}${a.accuracy_m!=null?' (GPS ±'+a.accuracy_m+' m)':''}</div>
+    <div class="mt-3 inline-block text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">${stTxt(a.status)}${a.volunteer_name?' · '+esc(a.volunteer_name):''}</div>
+    ${taken?`<p class="mt-3 text-sm text-slate-500">${t('taken','Another volunteer is already helping this person.')}</p>`:''}
+    ${mine&&a.status==='reached'?`<p class="mt-3 text-sm text-slate-500">${t('wait_safe','Waiting for the person to confirm they are safe.')}</p>`:''}`;
+  const btn=(act,label,cls)=>`<button onclick="respond(${a.id},'${act}')" class="px-5 py-3 rounded-xl text-white font-extrabold text-lg ${cls}">${label}</button>`;
+  let b='';
+  if(a.status==='open')b=btn('accept',t('b_accept','✋ Accept & help'),'bg-safe');
+  else if(mine&&a.status==='accepted')b=btn('on_the_way',t('b_way',"🚗 I'm on the way"),'bg-brand');
+  else if(mine&&a.status==='on_the_way')b=btn('reached',t('b_reach',"✅ I've reached"),'bg-safe');
+  $('popBtns').innerHTML=b
+    +`<a class="px-4 py-3 rounded-xl border border-brand text-brand font-semibold" target="_blank" rel="noopener" href="${dirLink(a.latitude,a.longitude)}">${t('b_maps','🗺 Open in Maps')}</a>`
+    +(l.length>1?`<button onclick="popNav(-1)" class="px-3 py-3 rounded-xl border border-slate-300" aria-label="Previous">◀</button><button onclick="popNav(1)" class="px-3 py-3 rounded-xl border border-slate-300" aria-label="Next">▶</button>`:'')
+    +`<button onclick="closeSosPopup()" class="ml-auto px-4 py-3 rounded-xl border border-slate-300">${a.status==='open'?t('b_later','Later'):t('b_close','Close')}</button>`;
+}
+async function respond(id,action){
+  const r=await api(`/api/alerts/${id}/respond`,{action});if(r.error){if(!(await checkSession()))toast(r.error,'danger');return}
+  const i=S.alerts.findIndex(x=>x.id===id);if(i>-1)S.alerts[i]=r.alert;renderSos();drawMaps();
+}
+
+/* ---------- Location (only after the browser permission prompt; used to target alerts) ---------- */
+let lastSent=0,watchId=null;
+const lastLoc=()=>{try{return JSON.parse(localStorage.getItem('rn-lastloc'))}catch(e){return null}};
+function sendLoc(force){if(!S.loc)return;const tm=Date.now();if(!force&&tm-lastSent<20000)return;lastSent=tm;socket.emit('set_location',{lat:S.loc.lat,lng:S.loc.lng})}
+function startLocation(){
+  if(!navigator.geolocation)return toast('Location is not supported on this device.','warn');
+  if(watchId!==null)return;
+  watchId=navigator.geolocation.watchPosition(p=>{
+    S.loc={lat:p.coords.latitude,lng:p.coords.longitude,accuracy:Math.round(p.coords.accuracy)};
+    try{localStorage.setItem('rn-lastloc',JSON.stringify(S.loc))}catch(e){}
+    sendLoc(false);$('locBtn').textContent=t('loc_on','📍 Local alerts ON');$('locBtn').className='px-3 py-1 rounded-full bg-green-100 text-green-700';
+  },err=>{if(err.code===1){navigator.geolocation.clearWatch(watchId);watchId=null;toast('Location is blocked. Allow it in the browser to get alerts for your area.','warn')}},
+  {enableHighAccuracy:false,maximumAge:30000,timeout:20000});
+}
+
+/* ---------- Offline guidance: SMS fallback ---------- */
+function updateOffline(){
+  const off=!navigator.onLine||(socketEver&&!socket.connected),el=$('offBanner');
+  el.classList.toggle('hidden',!off);if(!off)return;
+  const p=S.loc||lastLoc(),body=`SOS medical ${p?p.lat.toFixed(5):'<lat>'},${p?p.lng.toFixed(5):'<lng>'}`;
+  el.innerHTML=`⚠️ <b>${t('off_title','No internet connection.')}</b> ${t('off_body','Send an SMS instead:')} <code>${esc(body)}</code> `+(S.sms_number?`→ <a class="underline font-bold" href="sms:${esc(S.sms_number)}?body=${encodeURIComponent(body)}">${esc(S.sms_number)}</a>`:`(${t('off_nonum','SMS number not configured')})`);
+}
+window.addEventListener('online',updateOffline);window.addEventListener('offline',updateOffline);
+
+/* ---------- Session guard: login is shared by all tabs of one browser ---------- */
+async function checkSession(){
+  if(!S.ready)return false;
+  try{const d=await (await fetch('/api/state')).json();
+    if((S.me?S.me.id:null)!==(d.me?d.me.id:null)){toast('You logged in as a different user in another tab/window. Reloading…','warn');setTimeout(()=>location.reload(),1500);return true}
+  }catch(e){}
+  return false;
+}
+window.addEventListener('focus',checkSession);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkSession()});
+
+/* ---------- Socket.IO ---------- */
+const socket=io();
+socket.on('connect',()=>{socketEver=true;if(S.loc)sendLoc(true);$('conn').textContent='● Live';$('conn').className='px-3 py-1 rounded-full bg-green-100 text-green-700';updateOffline()});
+socket.on('disconnect',()=>{$('conn').textContent='Offline';$('conn').className='px-3 py-1 rounded-full bg-red-100 text-red-700';updateOffline()});
+socket.on('flood_emergency_alert',showFlood);                // siren: /static/siren.js
+socket.on('sensor_update',s=>{const i=S.sensors.findIndex(x=>x.id===s.id);if(i>-1)S.sensors[i]=s;if(S.near&&S.near.id===s.id){S.near.level=s.current_level;S.near.state=s.state;renderNear()}renderStats();renderSensors()});
+socket.on('zones_update',z=>{S.zones=z;renderStats();drawMaps()});
+socket.on('camps_update',c=>{S.camps=c;renderCamps();drawMaps()});
+socket.on('notification',n=>{S.notifications.unshift(n);unread++;renderBadge();renderNotifs()});
+socket.on('volunteer_count',d=>{S.volunteers=d.count;renderStats()});
+socket.on('new_distress_alert',a=>{S.alerts=S.alerts.filter(x=>x.id!==a.id);S.alerts.unshift(a);drawMaps();if(isVol()){ping();openSosPopup(a.id)}});
+socket.on('sos_update',u=>{
+  if(S.mySos&&S.mySos.id===u.id){
+    if(u.status==='resolved')S.mySos=null;else{Object.assign(S.mySos,{status:u.status,volunteer_name:u.volunteer_name});
+      if(u.status!=='open')toast(({accepted:'🙋 ',on_the_way:'🚗 ',reached:'✅ '}[u.status]||'')+u.volunteer_name+' · '+stTxt(u.status),'info')}
+    renderMySos();
+  }
+  const i=S.alerts.findIndex(x=>x.id===u.id);
+  if(i>-1){if(u.status==='resolved')S.alerts.splice(i,1);else Object.assign(S.alerts[i],{status:u.status,volunteer_id:u.volunteer_id,volunteer_name:u.volunteer_name});renderSos();drawMaps()}
+});
+socket.on('flood_warning',w=>toast((w.severity==='rising'?'🌊 ':'⚠️ ')+((LANG==='hi'&&w.message_hi)||w.message),'warn'));
+socket.on('nearest_sensor',n=>{S.near=n;renderNear()});
+
+/* ---------- Actions ---------- */
+const open_=id=>$(id).classList.remove('hidden'),close_=id=>$(id).classList.add('hidden');
+let sosAcc=null;
+$('sosBtn').onclick=()=>{
+  if(!S.me){location.href='/login?next=/';return}
+  open_('sosModal');sosAcc=null;
+  if(S.loc){$('lat').value=S.loc.lat.toFixed(5);$('lng').value=S.loc.lng.toFixed(5);sosAcc=S.loc.accuracy??null}
+  $('geoNote').textContent='…';
+  if(!navigator.geolocation){$('geoNote').textContent='Location not available – enter it manually.';return}
+  navigator.geolocation.getCurrentPosition(p=>{$('lat').value=p.coords.latitude.toFixed(5);$('lng').value=p.coords.longitude.toFixed(5);sosAcc=Math.round(p.coords.accuracy);$('geoNote').textContent=`📍 GPS ±${sosAcc} m`},
+    ()=>{$('geoNote').textContent=S.loc?`📍 GPS ±${sosAcc} m`:'Could not get location – enter it manually.'},{enableHighAccuracy:true,timeout:10000,maximumAge:15000});
+};
+$('sosCancel').onclick=()=>close_('sosModal');
+$('sosSend').onclick=async()=>{
+  const r=await api('/api/alerts/trigger',{latitude:$('lat').value,longitude:$('lng').value,urgency_level:$('urgency').value,accuracy:sosAcc});
+  if(r.error)return alert(r.error);
+  S.mySos=r.alert;renderMySos();close_('sosModal');
+  $('sosDoneMsg').textContent=`📍 GPS ${r.alert.latitude.toFixed(5)}, ${r.alert.longitude.toFixed(5)}${r.alert.accuracy_m!=null?' (±'+r.alert.accuracy_m+' m)':''} · ${r.volunteers_notified} volunteer(s) + control room alerted.`;
+  open_('sosDone');
+};
+$('sosDoneBtn').onclick=()=>close_('sosDone');
+$('volBtn').onclick=()=>{S.me?show('community'):location.href='/login#register'};
+$('rSend').onclick=async()=>{
+  if(!S.me){location.href='/login?next=/';return}
+  const p=S.loc||{lat:null,lng:null};
+  const r=await api('/api/reports',{kind:$('rKind').value,text:$('rText').value,latitude:p.lat,longitude:p.lng});
+  if(r.error)return alert(r.error);S.reports.unshift(r.report);$('rText').value='';renderTeams();drawMaps();
+};
+$('heroSos').onclick=()=>$('sosBtn').click();
+$('heroVol').onclick=()=>$('volBtn').click();
+$('sosFab').onclick=()=>{const l=liveSos();if(l.length)openSosPopup(l[Math.min(popIdx,l.length-1)].id)};
+$('locBtn').onclick=startLocation;
+if(navigator.permissions&&navigator.permissions.query)navigator.permissions.query({name:'geolocation'}).then(p=>{if(p.state==='granted')startLocation()}).catch(()=>{});
+$('armBtn2').onclick=()=>arm();
+$('themeBtn').onclick=()=>{const d=document.documentElement.classList.toggle('dark');try{localStorage.setItem('rn-theme',d?'dark':'light')}catch(e){}};
+
+/* ---------- Init ---------- */
+makeMap('mapMini');makeMap('mapFull');applyLang();
+fetch('/api/state').then(r=>r.json()).then(d=>{
+  Object.assign(S,d);S.mySos=d.my_sos||null;S.ready=true;renderAll();updateOffline();
+  if(isVol()){const w=liveSos().find(a=>a.status==='open'||a.volunteer_id===S.me.id);if(w)openSosPopup(w.id);
+    toast('📍 Tap "Enable local alerts" so SOS from people near you can reach you.','warn')}
+}).catch(()=>{$('conn').textContent='Server unreachable'});
+show('overview');
+</script>
+</body>
+</html>
