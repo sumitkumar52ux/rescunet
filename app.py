@@ -20,10 +20,12 @@ from datetime import datetime
 from functools import wraps
 from itertools import count
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_from_directory,
+                   session, url_for)
 from flask_socketio import SocketIO, join_room
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import push         # Web Push (push.py): alerts even when the website is closed
 import sms          # SMS layer (sms.py): alerts to phones without internet
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -32,9 +34,12 @@ log = logging.getLogger("rescunet")
 app = Flask(__name__)
 # Set SECRET_KEY in the environment to keep logins valid across restarts.
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or secrets.token_hex(24)
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "") == "1")   # set COOKIE_SECURE=1 when hosted on https
 # Same-origin only (no "*"): cross-site pages cannot open an authenticated socket.
-socketio = SocketIO(app, async_mode="threading")
+# ALLOWED_ORIGINS="https://your-app.up.railway.app" (comma separated) is optional; default = same origin
+_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()] or None
+socketio = SocketIO(app, async_mode="threading", cors_allowed_origins=_origins)
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Admin@123")   # CHANGE for any real use
@@ -42,6 +47,8 @@ ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "")                    # control-roo
 SMS_GATEWAY_NUMBER = os.environ.get("SMS_GATEWAY_NUMBER", "")        # number people text when offline (shown in the app)
 SMS_WEBHOOK_SECRET = os.environ.get("SMS_WEBHOOK_SECRET", "sms-demo-key")   # protects /api/sms/incoming
 IOT_API_KEY = os.environ.get("IOT_API_KEY", "iot-demo-key")       # key sent by real sensor hardware
+if os.environ.get("PORT") and ADMIN_PASSWORD == "Admin@123":
+    log.warning("SECURITY: running on a host with the DEFAULT admin password. Set ADMIN_PASSWORD, SECRET_KEY, IOT_API_KEY and SMS_WEBHOOK_SECRET now.")
 NEARBY_KM = 10          # volunteers within this radius get an SOS
 SOS_COOLDOWN_S = 30     # anti-abuse: one SOS per user per 30 s
 ALERT_RADIUS_KM = 25    # users within this distance of a sensor get its warnings/siren
@@ -85,6 +92,7 @@ rescue_teams = {
     2: {"id": 2, "name": "Team 2", "lat": 25.6350, "lng": 85.1100, "status": "On Duty", "distance_km": 4.7},
     3: {"id": 3, "name": "Team 3", "lat": 25.5700, "lng": 85.2200, "status": "On Duty", "distance_km": 5.1},
 }
+last_siren = {"payload": None, "time": 0.0}   # lets a device that opens the site from a notification start the siren screen
 community_reports = []
 notifications = [{"type": "info", "title": "RescuNet is live", "body": "Monitoring river sensors and relief camps.", "created_at": ""}]
 
@@ -204,21 +212,49 @@ def sms_all_users():
     return [(u["phone"], u["name"]) for u in users.values() if u["phone"]]
 
 
-def emit_warning(sids, severity, message, message_hi=None):
+def push_targets_for_sensor(sensor):
+    """Push subscriptions inside the sensor radius, or with unknown location, plus every admin device."""
+    out = []
+    for sub in list(push.subs):
+        u = users.get(sub["user_id"]) if sub["user_id"] else None
+        if (u and u["role"] == "admin") or sub["lat"] is None or \
+                haversine_km(sensor["lat"], sensor["lng"], sub["lat"], sub["lng"]) <= ALERT_RADIUS_KM:
+            out.append(sub)
+    return out
+
+
+def push_targets_for_users(ids):
+    ids = set(ids)
+    return [sub for sub in list(push.subs) if sub["user_id"] in ids]
+
+
+def emit_warning(sids, severity, message, message_hi=None, sensor=None):
     for sid in sids:
         socketio.emit("flood_warning", {"severity": severity, "message": message, "message_hi": message_hi,
                                         "timestamp": now()}, to=sid)
+    if sensor:       # also reaches phones where the website is closed
+        rising = severity == "rising"
+        push.notify(push_targets_for_sensor(sensor), {
+            "kind": "warning", "tag": "warning", "url": "/", "urgent": False,
+            "title": "🌊 Water rising fast" if rising else "⚠️ Flood warning",
+            "title_hi": "🌊 पानी तेज़ी से बढ़ रहा है" if rising else "⚠️ बाढ़ की चेतावनी",
+            "body": message, "body_hi": message_hi})
 
 
-def broadcast_emergency(message, source, sids=None, message_hi=None):
+def broadcast_emergency(message, source, sids=None, message_hi=None, sensor=None):
     """THE siren. sids=None -> every connected client (admin MASTER SIREN).
-    sids=[...]        -> only clients near the sensor that crossed the danger level."""
+    sids=[...]        -> only clients near the sensor that crossed the danger level.
+    Web Push goes out too, so phones with the website CLOSED are woken up."""
     payload = {"message": message, "message_hi": message_hi, "source": source, "lead_time": "30-60 minutes", "timestamp": now()}
+    last_siren.update(payload=payload, time=time.time())
     if sids is None:
         socketio.emit("flood_emergency_alert", payload)
     else:
         for sid in sids:
             socketio.emit("flood_emergency_alert", payload, to=sid)
+    push.notify(push_targets_for_sensor(sensor) if sensor else list(push.subs), {
+        "kind": "siren", "tag": "siren", "url": "/#siren", "urgent": True,
+        "title": "🚨 FLOOD EMERGENCY", "title_hi": "🚨 बाढ़ आपातकाल", "body": message, "body_hi": message_hi})
 
 
 # --------------------------------------------------------------------------
@@ -227,6 +263,67 @@ def broadcast_emergency(message, source, sids=None, message_hi=None):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/sw.js")
+def service_worker():
+    """The service worker must be served from the site root so it can control the whole site."""
+    resp = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/manifest.json")
+def web_manifest():
+    return send_from_directory(app.static_folder, "manifest.json", mimetype="application/manifest+json")
+
+
+@app.route("/api/last-siren")
+def get_last_siren():
+    """Opened from a notification: show the siren screen for an alert from the last 30 minutes."""
+    recent = last_siren["payload"] and time.time() - last_siren["time"] < 1800
+    return jsonify(payload=last_siren["payload"] if recent else None)
+
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def push_subscribe():
+    d = request.get_json(silent=True) or {}
+    u = current_user()
+    try:
+        lat, lng = float(d["lat"]), float(d["lng"])
+        assert -90 <= lat <= 90 and -180 <= lng <= 180
+    except (KeyError, TypeError, ValueError, AssertionError):
+        lat = lng = None
+    done, err = push.add(d.get("subscription"), u["id"] if u else None, lat, lng, "hi" if d.get("lang") == "hi" else "en")
+    return (jsonify(ok=True), 200) if done else (jsonify(error=err), 400)
+
+
+@app.route("/api/push/location", methods=["POST"])
+def push_location():
+    d = request.get_json(silent=True) or {}
+    try:
+        push.set_location(d["endpoint"], float(d["lat"]), float(d["lng"]))
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="endpoint, lat and lng required"), 400
+    return jsonify(ok=True)
+
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def push_unsubscribe():
+    push.remove((request.get_json(silent=True) or {}).get("endpoint", ""))
+    return jsonify(ok=True)
+
+
+@app.route("/api/admin/push/test", methods=["POST"])
+@api_roles("admin")
+def push_test():
+    """Send a test notification to the admin's own subscribed devices."""
+    me = current_user()
+    n = push.notify(push_targets_for_users([me["id"]]), {"kind": "info", "tag": "test", "url": "/admin", "urgent": False,
+                                                          "title": "RescuNet test", "body": "Background alerts are working."})
+    audit(me["username"], "push_test", f"{n} device(s)")
+    return jsonify(ok=True, devices=n, configured=push.configured())
 
 
 @app.route("/login")
@@ -339,6 +436,9 @@ def login():
 
 @app.route("/api/auth/logout", methods=["POST"])
 def logout():
+    endpoint = (request.get_json(silent=True) or {}).get("endpoint")
+    if endpoint:
+        push.detach(endpoint)          # this device stops receiving the logged-out user's personal pushes
     session.clear()
     return jsonify(ok=True)
 
@@ -377,6 +477,11 @@ def publish_sos_update(a):
         socketio.emit("sos_update", payload, to=room)
     if a["phone"] and a["volunteer_name"] and a["status"] in SMS_STATUS_TEXT:
         sms.send_sms(a["phone"], f"RescuNet: {a['volunteer_name']} {SMS_STATUS_TEXT[a['status']]}.", "sos_status", a["name"])
+    if a["user_id"] is not None and a["volunteer_name"] and a["status"] in SMS_STATUS_TEXT:
+        push.notify(push_targets_for_users([a["user_id"]]), {
+            "kind": "status", "tag": f"sos-{a['id']}", "url": "/", "urgent": False,
+            "title": "🙋 Help is coming", "title_hi": "🙋 मदद आ रही है",
+            "body": f"{a['volunteer_name']} {SMS_STATUS_TEXT[a['status']]}."})
 
 
 def find_alert(alert_id):
@@ -399,6 +504,7 @@ def get_state():
         "my_sos": alert_view(mine[-1]) if mine else None,    # the user's own active SOS (status tracker)
         "volunteers": sum(1 for x in users.values() if x["role"] == "volunteer"),
         "sms_number": SMS_GATEWAY_NUMBER,
+        "vapid_public_key": push.PUBLIC if push.configured() else "",
         **({"volunteers_list": [{"id": v["id"], "name": v["name"], "skill": v["skill"], "phone": v["phone"],
                                  "lat": v["lat"], "lng": v["lng"]} for v in users.values() if v["role"] == "volunteer"],
             "sms_recipients": len(sms_all_users())} if u and u["role"] == "admin" else {}),
@@ -416,6 +522,10 @@ def notify_volunteers(alert, vids):
     text = (f"RescuNet SOS #{alert['id']} ({alert['urgency_level'].replace('_', ' ')}) from {alert['name']}. "
             f"Location: {link} Reply ACCEPT {alert['id']} to help.")
     sms.send_many([(users[v]["phone"], users[v]["name"]) for v in vids], text, "sos")
+    push.notify(push_targets_for_users(vids), {
+        "kind": "sos", "tag": f"sos-{alert['id']}", "url": "/", "urgent": True,
+        "title": "🆘 SOS nearby", "title_hi": "🆘 पास में SOS",
+        "body": f"{alert['urgency_level'].replace('_', ' ')} - {alert['name']}. Open RescuNet to accept."})
 
 
 def create_sos(owner, name, phone, lat, lng, urgency, ack=True, accuracy=None):
@@ -437,6 +547,9 @@ def create_sos(owner, name, phone, lat, lng, urgency, ack=True, accuracy=None):
     notify_volunteers(alert, notified)
     socketio.emit("new_distress_alert", alert_view(alert), to="admins")
     admins = [(x["phone"], x["name"]) for x in users.values() if x["role"] == "admin"]
+    push.notify(push_targets_for_users([x["id"] for x in users.values() if x["role"] == "admin"]), {
+        "kind": "sos", "tag": f"sos-{alert['id']}", "url": "/admin", "urgent": True,
+        "title": "🆘 New SOS", "body": f"{urgency.replace('_', ' ')} - {name}"})
     sms.send_many(admins, f"RescuNet SOS #{alert['id']} ({urgency.replace('_', ' ')}) from {name}: "
                           f"https://maps.google.com/?q={lat:.5f},{lng:.5f}", "sos")
     if ack and phone:
@@ -581,7 +694,7 @@ def update_sensor():
             push_notification("danger", "Flood Alert", f"High water level detected: {sensor['name']} at {level:.1f} m.")
             broadcast_emergency(f"FLOOD EMERGENCY: {sensor['name']} reached {level:.1f} m (danger level "
                                 f"{sensor['danger_level']:.1f} m). Move to higher ground and the nearest relief camp NOW.",
-                                sensor["name"], sids=targets,
+                                sensor["name"], sids=targets, sensor=sensor,
                                 message_hi=f"बाढ़ आपातकाल: {sensor['name']} का जल स्तर {level:.1f} मीटर पहुँच गया है (खतरे का स्तर "
                                            f"{sensor['danger_level']:.1f} मीटर)। तुरंत ऊँचे स्थान या नज़दीकी राहत शिविर की ओर जाएँ।")
             audit("system", "AUTO_SIREN", f"{sensor['name']} at {level:.1f} m -> {len(targets)} clients")
@@ -600,7 +713,7 @@ def update_sensor():
             msg, severity = f"{sensor['name']} crossed the warning level ({level:.1f} m). Stay alert.", "warning"
             msg_hi = f"{sensor['name']} का जल स्तर चेतावनी स्तर ({level:.1f} मीटर) पार कर गया है। सतर्क रहें।"
         push_notification("warning", "Flood warning", msg)
-        emit_warning(targets, severity, msg, msg_hi)
+        emit_warning(targets, severity, msg, msg_hi, sensor=sensor)
         sms.send_many(sms_recipients_for_sensor(sensor), f"RescuNet warning: {msg}", "warning")
     return jsonify(ok=True, sensor=sensor, emergency=emergency, clients_in_range=len(targets))
 
@@ -790,7 +903,7 @@ def sms_incoming():
 @app.route("/api/admin/sms")
 @api_roles("admin")
 def sms_outbox():
-    return jsonify(mode=sms.MODE, provider=sms.status(), messages=sms.outbox[:60])
+    return jsonify(mode=sms.MODE, provider=sms.status(), push=push.status(), messages=sms.outbox[:60])
 
 
 @app.route("/api/admin/sms/simulate", methods=["POST"])
@@ -843,4 +956,4 @@ def on_set_location(data):
 if __name__ == "__main__":
     print("RescuNet running at http://127.0.0.1:5000")
     print(f"Admin login -> username: {ADMIN_USER}   password: {ADMIN_PASSWORD}   (set ADMIN_PASSWORD env var to change)")
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, allow_unsafe_werkzeug=True)

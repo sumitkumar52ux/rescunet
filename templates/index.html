@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0B192C">
+<link rel="icon" href="/static/icon-192.png">
 <script>try{if((localStorage.getItem("rn-theme")||"dark")==="dark")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}</script>
 <title>RescuNet – Real-Time Alerts. Safer Communities.</title>
 <script src="https://cdn.tailwindcss.com"></script>
@@ -91,6 +94,11 @@
       <span id="authBox" class="flex items-center gap-2"></span>
     </div>
   </header>
+  <div id="pushBanner" class="hidden px-4 md:px-8 py-2 bg-blue-600 text-white text-sm flex flex-wrap items-center gap-3">
+    <span class="font-semibold" data-i18n="push_banner">🔔 Get flood warnings and SOS alerts even when this website is closed.</span>
+    <button id="pushEnable" class="px-3 py-1 rounded-full bg-white text-blue-700 font-bold" data-i18n="push_enable">Turn on</button>
+    <button id="pushLater" class="px-3 py-1 rounded-full border border-white/60" data-i18n="push_later">Not now</button>
+  </div>
   <div id="offBanner" class="hidden px-4 md:px-8 py-2 bg-yellow-400 text-black text-sm font-semibold"></div>
   <nav id="mnav" class="md:hidden flex overflow-x-auto gap-1 bg-white border-b border-[#E3EAF6] px-2 py-1 text-sm">
     <a data-v="overview" class="px-3 py-2 whitespace-nowrap">Dashboard</a><a data-v="map" class="px-3 py-2 whitespace-nowrap">Live Map</a><a data-v="alerts" class="px-3 py-2 whitespace-nowrap">Alerts</a><a data-v="teams" class="px-3 py-2 whitespace-nowrap">Teams</a><a data-v="community" class="px-3 py-2 whitespace-nowrap">Community</a><a data-v="help" class="px-3 py-2 whitespace-nowrap">Helplines</a><a data-v="settings" class="px-3 py-2 whitespace-nowrap">Settings</a>
@@ -219,6 +227,13 @@
       <button id="armBtn2" class="border border-safe text-safe hover:bg-safe hover:text-white px-4 py-2 rounded-lg font-semibold" data-i18n="set_test">🔊 Test alert sound</button>
       <p class="text-sm text-slate-500" data-i18n="set_lock">🔒 The global siren can only be triggered by authorized disaster-management officials. Your SOS is private: it goes to nearby volunteers and the control room, never to the public.</p>
     </div>
+    <div class="card p-5 max-w-xl space-y-3">
+      <h2 class="text-xl font-bold" data-i18n="push_title">🔔 Background alerts</h2>
+      <p class="text-sm text-slate-600" data-i18n="push_body">Receive siren warnings, flood alerts and SOS notifications on this device even when the website is closed. Keep the phone sound on and Do-Not-Disturb off.</p>
+      <p id="pushStatus" class="text-sm font-semibold"></p>
+      <div class="flex gap-2"><button id="pushOn" class="hidden bg-brand text-white font-bold px-4 py-2 rounded-lg" data-i18n="push_enable">Turn on</button><button id="pushOff" class="hidden border border-slate-300 px-4 py-2 rounded-lg" data-i18n="push_turnoff">Turn off</button></div>
+      <p id="iosHint" class="hidden text-xs text-slate-500" data-i18n="push_ios">iPhone/iPad: tap Share, then "Add to Home Screen", open RescuNet from the home screen, and turn alerts on there.</p>
+    </div>
   </section>
   </main>
 </div>
@@ -282,6 +297,7 @@ const HI={nav_dash:'डैशबोर्ड',nav_map:'लाइव नक्श
  my_gps:'📍 सटीक GPS लोकेशन कंट्रोल रूम और पास के स्वयंसेवकों को भेजी गई',
  b_accept:'✋ स्वीकार करें और मदद करें',b_way:'🚗 मैं निकल रहा हूँ',b_reach:'✅ मैं पहुँच गया',b_later:'बाद में',b_close:'बंद करें',b_maps:'🗺 नक्शे में खोलें',taken:'कोई और स्वयंसेवक पहले से मदद कर रहा है।',wait_safe:'व्यक्ति के सुरक्षित होने की पुष्टि का इंतज़ार है।',
  hero_title:'रियल-टाइम अलर्ट। सुरक्षित समुदाय।',hero_sub:'बाढ़ की निगरानी, पूर्व चेतावनी और तेज़ बचाव के लिए एक सामुदायिक प्लेटफ़ॉर्म।',hero_sos:'🚨 SOS भेजें',hero_vol:'🤝 स्वयंसेवक बनें',hero_f1:'🛡 बाढ़ क्षेत्रों की निगरानी',hero_f2:'👥 समुदायों को अलर्ट',hero_f3:'🛟 जान बचाएँ',
+ push_banner:'🔔 वेबसाइट बंद होने पर भी बाढ़ की चेतावनी और SOS अलर्ट पाएँ।',push_enable:'चालू करें',push_later:'अभी नहीं',push_turnoff:'बंद करें',push_title:'🔔 बैकग्राउंड अलर्ट',push_body:'वेबसाइट बंद होने पर भी इस डिवाइस पर सायरन चेतावनी, बाढ़ अलर्ट और SOS सूचनाएँ पाएँ। फ़ोन की आवाज़ चालू और Do-Not-Disturb बंद रखें।',push_ios:'iPhone/iPad: Share दबाएँ, "Add to Home Screen" चुनें, फिर RescuNet होम स्क्रीन से खोलकर अलर्ट चालू करें।',push_on:'✅ चालू – वेबसाइट बंद होने पर भी अलर्ट इस डिवाइस तक पहुँचेंगे',push_off:'बंद',push_denied:'ब्राउज़र सेटिंग में ब्लॉक है – इस साइट के लिए सूचनाएँ अनुमति दें',push_noserver:'सर्वर पर अभी सेट नहीं है',push_unsupported:'यह ब्राउज़र बैकग्राउंड अलर्ट सपोर्ट नहीं करता',
  off_title:'इंटरनेट नहीं है।',off_body:'इसके बजाय SMS भेजें:',off_nonum:'SMS नंबर सेट नहीं है',
  pri_high:'उच्च प्राथमिकता',pri_medium:'मध्यम',pri_low:'कम',away:'दूर',
  near_a:'📍 आपका इलाका: सबसे नज़दीकी नदी सेंसर',near_b:'सामान्य',away_km:'किमी दूर',outside:'अलर्ट दायरे से बाहर'};
@@ -294,7 +310,7 @@ function applyLang(){
   $('langBtn').textContent=LANG==='hi'?'EN':'हिं';
   if(S.loc)$('locBtn').textContent=t('loc_on','📍 Local alerts ON');
 }
-$('langBtn').onclick=()=>{LANG=LANG==='hi'?'en':'hi';try{localStorage.setItem('rn-lang',LANG)}catch(e){}applyLang();if(S.ready)renderAll();updateOffline()};
+$('langBtn').onclick=()=>{LANG=LANG==='hi'?'en':'hi';try{localStorage.setItem('rn-lang',LANG)}catch(e){}applyLang();if(S.ready)renderAll();updateOffline();syncPush();renderPush()};
 
 /* ---------- Navigation ---------- */
 let maps={};
@@ -401,7 +417,7 @@ function renderAuth(){
   const m=S.me;
   $('authBox').innerHTML=m?`<span class="px-3 py-1 rounded-full bg-blue-100 text-blue-800">${esc(m.name)} · ${esc(m.role)}</span>${(m.role==='admin'||m.role==='camp_manager')?`<a href="/admin" class="px-3 py-1 rounded-full bg-alert text-white font-semibold">${m.role==='admin'?'Admin panel':'Camp panel'}</a>`:''}<button id="logoutBtn" class="px-3 py-1 rounded-full border border-slate-300">Logout</button>`
     :'<a href="/login" class="px-3 py-1 rounded-full bg-brand text-white font-semibold">Login / Register</a>';
-  if($('logoutBtn'))$('logoutBtn').onclick=async()=>{await api('/api/auth/logout');location.reload()};
+  if($('logoutBtn'))$('logoutBtn').onclick=async()=>{await api('/api/auth/logout',{endpoint:pushSub?pushSub.endpoint:null});location.reload()};
   $('volLink').classList.toggle('hidden',!!m);
 }
 function renderAll(){renderAuth();renderStats();renderSensors();renderCamps();renderNotifs();renderTeams();renderHelp();renderMySos();renderNear();renderSos();drawMaps()}
@@ -471,7 +487,8 @@ async function respond(id,action){
 /* ---------- Location (only after the browser permission prompt; used to target alerts) ---------- */
 let lastSent=0,watchId=null;
 const lastLoc=()=>{try{return JSON.parse(localStorage.getItem('rn-lastloc'))}catch(e){return null}};
-function sendLoc(force){if(!S.loc)return;const tm=Date.now();if(!force&&tm-lastSent<20000)return;lastSent=tm;socket.emit('set_location',{lat:S.loc.lat,lng:S.loc.lng})}
+function sendLoc(force){if(!S.loc)return;const tm=Date.now();if(!force&&tm-lastSent<20000)return;lastSent=tm;socket.emit('set_location',{lat:S.loc.lat,lng:S.loc.lng});
+  if(pushSub&&tm-lastPushLoc>60000){lastPushLoc=tm;api('/api/push/location',{endpoint:pushSub.endpoint,lat:S.loc.lat,lng:S.loc.lng})}}
 function startLocation(){
   if(!navigator.geolocation)return toast('Location is not supported on this device.','warn');
   if(watchId!==null)return;
@@ -502,6 +519,52 @@ async function checkSession(){
 }
 window.addEventListener('focus',checkSession);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkSession()});
+
+/* ---------- Background alerts (Web Push + service worker) ---------- */
+const pushOK=()=>'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+const b64u=b=>{const s2=(b+'='.repeat((4-b.length%4)%4)).replace(/-/g,'+').replace(/_/g,'/');return Uint8Array.from(atob(s2),c=>c.charCodeAt(0))};
+let pushSub=null,lastPushLoc=0;
+async function pushState(){
+  if(!pushOK())return 'unsupported';
+  if(!S.vapid)return 'noserver';
+  if(Notification.permission==='denied')return 'denied';
+  try{const reg=await navigator.serviceWorker.ready;pushSub=await reg.pushManager.getSubscription()}catch(e){return 'unsupported'}
+  return pushSub?'on':'off';
+}
+async function renderPush(){
+  const st=await pushState();
+  $('pushStatus').textContent={on:t('push_on','✅ ON – alerts reach this device even when the website is closed'),off:t('push_off','Off'),denied:t('push_denied','Blocked in browser settings – allow notifications for this site'),noserver:t('push_noserver','Not configured on the server yet'),unsupported:t('push_unsupported','This browser does not support background alerts')}[st];
+  $('pushOn').classList.toggle('hidden',st!=='off');$('pushOff').classList.toggle('hidden',st!=='on');
+  let dismissed=false;try{dismissed=localStorage.getItem('rn-push-dismissed')==='1'}catch(e){}
+  $('pushBanner').classList.toggle('hidden',!(st==='off'&&!dismissed&&Notification.permission==='default'));
+  $('iosHint').classList.toggle('hidden',!(/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.matchMedia('(display-mode: standalone)').matches));
+}
+async function syncPush(){            // tells the server who/where/which language this device is
+  if(!pushSub)return;const p=S.loc||lastLoc();
+  await api('/api/push/subscribe',{subscription:pushSub.toJSON(),lat:p?p.lat:null,lng:p?p.lng:null,lang:LANG});
+}
+async function enablePush(){
+  try{
+    if(!pushOK()||!S.vapid){await renderPush();return toast(t('push_noserver','Not configured on the server yet'),'warn')}
+    if((await Notification.requestPermission())!=='granted'){await renderPush();return toast(t('push_denied','Blocked in browser settings – allow notifications for this site'),'warn')}
+    const reg=await navigator.serviceWorker.ready;
+    pushSub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(S.vapid)});
+    await syncPush();toast(t('push_on','✅ ON – alerts reach this device even when the website is closed'),'info');
+  }catch(e){toast('Could not turn on background alerts: '+e.message,'danger')}
+  renderPush();
+}
+async function disablePush(){
+  if(pushSub){await api('/api/push/unsubscribe',{endpoint:pushSub.endpoint});try{await pushSub.unsubscribe()}catch(e){}pushSub=null}
+  renderPush();
+}
+async function showLastSiren(){try{const d=await (await fetch('/api/last-siren')).json();if(d.payload)showFlood(d.payload)}catch(e){}}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  navigator.serviceWorker.addEventListener('message',e=>{const m=e.data||{};
+    if(m.type==='push'&&m.data&&m.data.kind==='siren')showFlood({message:m.data.body,message_hi:null,source:'RescuNet',lead_time:'30-60 minutes',timestamp:new Date().toISOString()});
+    if(m.type==='open'&&String(m.url||'').includes('#siren'))showLastSiren();
+  });
+}
 
 /* ---------- Socket.IO ---------- */
 const socket=io();
@@ -557,6 +620,8 @@ $('rSend').onclick=async()=>{
 $('heroSos').onclick=()=>$('sosBtn').click();
 $('heroVol').onclick=()=>$('volBtn').click();
 $('sosFab').onclick=()=>{const l=liveSos();if(l.length)openSosPopup(l[Math.min(popIdx,l.length-1)].id)};
+$('pushEnable').onclick=enablePush;$('pushOn').onclick=enablePush;$('pushOff').onclick=disablePush;
+$('pushLater').onclick=()=>{try{localStorage.setItem('rn-push-dismissed','1')}catch(e){}renderPush()};
 $('locBtn').onclick=startLocation;
 if(navigator.permissions&&navigator.permissions.query)navigator.permissions.query({name:'geolocation'}).then(p=>{if(p.state==='granted')startLocation()}).catch(()=>{});
 $('armBtn2').onclick=()=>arm();
@@ -565,9 +630,10 @@ $('themeBtn').onclick=()=>{const d=document.documentElement.classList.toggle('da
 /* ---------- Init ---------- */
 makeMap('mapMini');makeMap('mapFull');applyLang();
 fetch('/api/state').then(r=>r.json()).then(d=>{
-  Object.assign(S,d);S.mySos=d.my_sos||null;S.ready=true;renderAll();updateOffline();
+  Object.assign(S,d);S.mySos=d.my_sos||null;S.vapid=d.vapid_public_key||'';S.ready=true;renderAll();updateOffline();
   if(isVol()){const w=liveSos().find(a=>a.status==='open'||a.volunteer_id===S.me.id);if(w)openSosPopup(w.id);
     toast('📍 Tap "Enable local alerts" so SOS from people near you can reach you.','warn')}
+  renderPush().then(syncPush);if(location.hash==='#siren')showLastSiren();
 }).catch(()=>{$('conn').textContent='Server unreachable'});
 show('overview');
 </script>

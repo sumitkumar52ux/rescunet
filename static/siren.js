@@ -44,13 +44,18 @@
     modal.style.display = 'none';
   }
   window.showFlood = function (d) {
-    const hi = (function () { try { return localStorage.getItem('rn-lang') === 'hi'; } catch (e) { return false; }   // Sound is unlocked silently on the user's first tap anywhere on the page - no 'Arm siren' button needed.
+    const hi = (function () { try { return localStorage.getItem('rn-lang') === 'hi'; } catch (e) { return false; }   // Opened from a notification the browser may block sound until a tap: start it on the first tap.
+  document.addEventListener('pointerdown', function () {
+    if (modal && modal.style.display === 'flex' && siren.paused && !osc) { siren.play().catch(fallbackOn); }
+  });
+  // Sound is unlocked silently on the user's first tap anywhere on the page - no 'Arm siren' button needed.
   document.addEventListener('pointerdown', function () { window.arm(true); }, { once: true });
 })();
     document.getElementById('floodTitle').textContent = hi ? 'बाढ़ की चेतावनी' : 'FLASH FLOOD WARNING';
     document.getElementById('muteBtn').textContent = hi ? '⚠️ सायरन बंद करें और निकलें' : '⚠️ MUTE SIREN & EVACUATE';
     document.getElementById('floodMsg').textContent = (hi && d.message_hi) || d.message;
     document.getElementById('floodMeta').textContent = (hi ? 'स्रोत: ' : 'Source: ') + d.source + (hi ? ' · अनुमानित समय ' : ' · Estimated lead time ') + d.lead_time + ' · ' + new Date(d.timestamp).toLocaleTimeString();
+    if (modal.style.display === 'flex') return;      // same alert arrived twice (socket + push): don't restart the sound
     modal.style.display = 'flex';
     siren.currentTime = 0; siren.play().catch(fallbackOn); vibOn();
   };

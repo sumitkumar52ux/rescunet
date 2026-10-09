@@ -58,7 +58,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="card p-5"><h2 class="text-xl font-bold mb-3">Audit log</h2><ul id="audit" class="space-y-1 text-xs text-slate-300 max-h-80 overflow-y-auto"></ul></div>
     <div class="card p-5">
       <h2 class="text-xl font-bold mb-1">SMS gateway <span id="smsMode" class="text-xs ml-2 px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-300"></span></h2>
-      <p id="smsStatus" class="text-xs text-slate-400 mb-3"></p>
+      <p id="smsStatus" class="text-xs text-slate-400 mb-1"></p>
+      <p id="pushStatus" class="text-xs mb-3"></p>
       <ul id="smsList" class="space-y-1 text-xs max-h-72 overflow-y-auto"></ul>
     </div>
   </section>
@@ -164,6 +165,7 @@ async function rAudit(){const r=await fetch('/api/admin/audit');if(!r.ok)return;
 async function rSms(){const r=await fetch('/api/admin/sms');if(!r.ok)return;const d=await r.json(),p=d.provider;
   $('smsMode').textContent=p.live?'LIVE: '+d.mode:'DEMO mode';$('smsMode').className='text-xs ml-2 px-2 py-1 rounded-full '+(p.live&&p.ready?'bg-green-700 text-white':p.live?'bg-red-700 text-white':'bg-yellow-500/20 text-yellow-300');
   $('smsStatus').textContent=!p.live?'Messages are NOT really sent (demo). Set SMS_MODE and provider keys to go live.':p.ready?'Provider configured. Use Test tools to send a test SMS.':'Provider NOT configured. Missing: '+p.missing.join(', ');
+  const pu=d.push;$('pushStatus').innerHTML='🔔 Background push (works when the website is closed): '+(pu.configured?'<b class="text-green-300">READY</b> · '+pu.subscribers+' device(s) subscribed':'<b class="text-yellow-300">NOT configured</b> – missing: '+esc(pu.missing.join(', ')));
   $('smsList').innerHTML=d.messages.map(m=>`<li class="rounded bg-[#0B192C] p-2"><span class="${m.dir==='in'?'text-sky-300':'text-green-300'} font-bold">${m.dir==='in'?'⬅ from':'➡ to'} ${esc(m.to)}</span> ${m.name?'('+esc(m.name)+')':''} · <span class="text-slate-400">${esc(m.time.slice(11))} · ${esc(m.kind)} · ${esc(m.status)}</span><br>${esc(m.text)}</li>`).join('')||'<li class="text-slate-400">No messages yet.</li>'}
 
 /* ---- master siren: typed confirmation ---- */

@@ -27,6 +27,12 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #fff;
     <p id="tRes" class="text-xs text-green-300"></p>
   </section>
   <section class="card p-5 space-y-2 md:col-span-2">
+    <h2 class="text-xl font-bold">Test background push</h2>
+    <p class="text-xs text-slate-400">First turn on "Background alerts" on this device (public site, Settings). Then close the website tab and press the button: a notification should appear.</p>
+    <button id="pSend" class="px-5 py-2 rounded bg-white/15 hover:bg-white/25 font-semibold">Send test notification to my devices</button>
+    <p id="pRes" class="text-xs text-green-300"></p>
+  </section>
+  <section class="card p-5 space-y-2 md:col-span-2">
     <h2 class="text-xl font-bold">Create a camp-manager account</h2>
     <p class="text-xs text-slate-400">Camp managers can update relief-camp occupancy and stock only. They cannot sound the siren, change sensors or dispatch volunteers.</p>
     <div class="grid sm:grid-cols-3 gap-2"><div><label class="text-xs" for="cName">Name</label><input id="cName"></div><div><label class="text-xs" for="cUser">Username</label><input id="cUser"></div><div><label class="text-xs" for="cPass">Password (8+ chars)</label><input id="cPass" type="password"></div></div>
@@ -39,5 +45,6 @@ const $=id=>document.getElementById(id);
 const api=async(u,b)=>{try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const d=await r.json();if(!r.ok)alert(d.error||'Error');return d}catch(e){alert('Network error');return{}}};
 $('smSend').onclick=async()=>{const d=await api('/api/admin/sms/simulate',{from:$('smFrom').value,body:$('smBody').value});if(d.reply)$('smReply').textContent='Reply: '+d.reply};
 $('tSend').onclick=async()=>{const d=await api('/api/admin/sms/test',{phone:$('tPhone').value});if(d.ok)$('tRes').textContent='Status: '+d.status};
+$('pSend').onclick=async()=>{const d=await api('/api/admin/push/test');if(d.ok)$('pRes').textContent=d.configured?`Sent to ${d.devices} device(s) of yours.`:'Push is not configured on the server (VAPID keys missing).'};
 $('cSend').onclick=async()=>{const d=await api('/api/admin/users',{name:$('cName').value,username:$('cUser').value,password:$('cPass').value});if(d.ok){$('cRes').textContent='Created: '+d.user.name+' (camp_manager)';$('cPass').value=''}};
 </script></body></html>

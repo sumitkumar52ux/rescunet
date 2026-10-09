@@ -65,3 +65,25 @@ Point the provider's "incoming message" webhook to:  https://YOUR-PUBLIC-HOST/ap
 - Control room: typed "SIREN" confirmation, live status bar, SOS dispatch (one volunteer or all), map preview,
   SMS provider status, audit log. Test tools moved to /admin/tools.
 - Roles: admin (control room officer) and camp_manager (camps only). Officers create camp managers in /admin/tools.
+
+## Hosting on Railway (WebSockets supported)
+- Start command (already in `Procfile`):  gunicorn -w 1 --threads 100 -b 0.0.0.0:$PORT app:app
+  Keep **one** worker (-w 1): all data lives in this process's memory.
+- Variables to set in Railway -> Variables (change every default!):
+    ADMIN_PASSWORD, SECRET_KEY (long random text), IOT_API_KEY, SMS_WEBHOOK_SECRET, COOKIE_SECURE=1
+    optional: ADMIN_PHONE, SMS_GATEWAY_NUMBER, SMS_MODE (+ provider keys), ALLOWED_ORIGINS
+- Data is still in memory: every deploy / restart clears accounts and alerts (a database is the next step).
+- SMS webhook:  https://YOUR-APP.up.railway.app/api/sms/incoming?key=SMS_WEBHOOK_SECRET
+- IoT sensors:  POST https://YOUR-APP.up.railway.app/api/sensors/update   header  X-IoT-Key: <IOT_API_KEY>
+
+## Alerts when the website is CLOSED (Web Push, v6)
+1. pip install -r requirements.txt            (adds pywebpush)
+2. python make_vapid_keys.py                  -> copy the 3 lines it prints into your environment variables
+   (Railway: Variables tab.  Windows:  set VAPID_PUBLIC_KEY=...  set VAPID_PRIVATE_KEY=...  set VAPID_SUBJECT=mailto:you@example.com)
+   Never change the keys later - every device would have to subscribe again.
+3. Open the site (HTTPS, or localhost) -> blue banner "Turn on" (or Settings -> Background alerts) -> Allow notifications.
+4. Close the website. Admin presses MASTER SIREN (or a sensor passes 15 m) -> a notification with vibration appears;
+   tapping it opens RescuNet and the full-screen siren starts. Test button: Admin -> Test tools -> "Send test notification".
+Honest limits: the notification uses the phone's normal sound (it cannot loop a siren) and is muted by Do-Not-Disturb;
+iPhone needs "Add to Home Screen" first; the device needs internet (SMS covers phones without it); subscriptions are kept in
+memory, so they reset when the server restarts (users are asked again on their next visit).
