@@ -87,3 +87,21 @@ Point the provider's "incoming message" webhook to:  https://YOUR-PUBLIC-HOST/ap
 Honest limits: the notification uses the phone's normal sound (it cannot loop a siren) and is muted by Do-Not-Disturb;
 iPhone needs "Add to Home Screen" first; the device needs internet (SMS covers phones without it); subscriptions are kept in
 memory, so they reset when the server restarts (users are asked again on their next visit).
+
+## AI forecast + mesh network (v7)
+### AI forecast (forecast.py)
+- A least-squares trend is fitted to each sensor's latest readings (<= 12, last 6 h). It gives the rise rate (m/h), the
+  ETA to the 14 m / 15 m levels (with a range), the level in 1 h / 3 h, and a confidence (readings + fit quality).
+  Shown on the public sensor cards and, with a sparkline, in the control room.
+- AI early warning: if danger level is forecast within 60 minutes (confidence medium/high) everyone near that sensor gets a
+  "Flood forecast" message (app + push + SMS), at most once per 10 minutes. It NEVER sounds the siren by itself.
+- Honest: this is classic statistics, not deep learning. Rivers can speed up or slow down.
+- FORECAST_DEMO=1 (default) treats readings closer than 10 minutes as 10 minutes apart so demos work. Set FORECAST_DEMO=0 in real use.
+- Flood simulator: Admin -> Test tools -> "Flood simulator" (forecast -> early warning -> siren). SIM_TICK_S sets the speed.
+### Mesh network (mesh.py) - public site -> "Mesh network"
+- Simulation of a LoRa-style multi-hop network: SOS hops node to node to a gateway with internet, waits when no path exists
+  (store-and-forward), re-routes when a relay/gateway fails; siren alerts spread from the gateways to every node.
+  Control room can switch nodes / gateway internet off to show self-healing. Delivered SOS = normal SOS marked "via mesh".
+- Real hardware: gateway/meshtastic_gateway.py (UNTESTED example, needs Meshtastic LoRa boards) posts radio texts such as
+  "SOS medical 25.61,85.16" to /api/mesh/ingest and broadcasts /api/mesh/outbox alerts into the radio mesh.
+  Set MESH_GATEWAY_KEY (same value on server and gateway). A browser cannot be a mesh node.

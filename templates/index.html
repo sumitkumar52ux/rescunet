@@ -75,6 +75,7 @@
     <a data-v="alerts" tabindex="0"><span>🔔</span><span data-i18n="nav_alerts">Alerts</span><span id="nBadge" class="ml-auto hidden text-xs bg-alert text-white rounded-full px-2">0</span></a>
     <a data-v="teams" tabindex="0"><span>👥</span><span data-i18n="nav_teams">Rescue Teams</span></a>
     <a data-v="community" tabindex="0"><span>🤝</span><span data-i18n="nav_comm">Community</span></a>
+    <a data-v="mesh" tabindex="0"><span>📡</span><span data-i18n="nav_mesh">Mesh network</span></a>
     <a data-v="help" tabindex="0"><span>📞</span><span data-i18n="nav_help">Helplines</span></a>
     <a data-v="settings" tabindex="0"><span>⚙</span><span data-i18n="nav_set">Settings</span></a>
   </nav>
@@ -101,7 +102,7 @@
   </div>
   <div id="offBanner" class="hidden px-4 md:px-8 py-2 bg-yellow-400 text-black text-sm font-semibold"></div>
   <nav id="mnav" class="md:hidden flex overflow-x-auto gap-1 bg-white border-b border-[#E3EAF6] px-2 py-1 text-sm">
-    <a data-v="overview" class="px-3 py-2 whitespace-nowrap">Dashboard</a><a data-v="map" class="px-3 py-2 whitespace-nowrap">Live Map</a><a data-v="alerts" class="px-3 py-2 whitespace-nowrap">Alerts</a><a data-v="teams" class="px-3 py-2 whitespace-nowrap">Teams</a><a data-v="community" class="px-3 py-2 whitespace-nowrap">Community</a><a data-v="help" class="px-3 py-2 whitespace-nowrap">Helplines</a><a data-v="settings" class="px-3 py-2 whitespace-nowrap">Settings</a>
+    <a data-v="overview" class="px-3 py-2 whitespace-nowrap">Dashboard</a><a data-v="map" class="px-3 py-2 whitespace-nowrap">Live Map</a><a data-v="alerts" class="px-3 py-2 whitespace-nowrap">Alerts</a><a data-v="teams" class="px-3 py-2 whitespace-nowrap">Teams</a><a data-v="community" class="px-3 py-2 whitespace-nowrap">Community</a><a data-v="mesh" class="px-3 py-2 whitespace-nowrap">Mesh</a><a data-v="help" class="px-3 py-2 whitespace-nowrap">Helplines</a><a data-v="settings" class="px-3 py-2 whitespace-nowrap">Settings</a>
   </nav>
 
   <main class="p-4 md:p-8 max-w-[1500px] mx-auto w-full">
@@ -205,6 +206,32 @@
     </div>
   </section>
 
+  <!-- ===== MESH NETWORK (offline, multi-hop) ===== -->
+  <section id="v-mesh" class="view space-y-4">
+    <h1 class="text-3xl font-extrabold" data-i18n="mesh_title">Offline Mesh Network</h1>
+    <p class="text-slate-600" data-i18n="mesh_sub">When mobile networks and internet fail, small radios pass an SOS from one node to the next until it reaches a gateway that still has internet. This is a live simulation of that idea.</p>
+    <div class="grid lg:grid-cols-3 gap-6">
+      <div class="card p-3 lg:col-span-2"><svg id="meshSvg" viewBox="0 0 800 460" class="w-full h-auto" role="img" aria-label="Mesh network diagram"></svg>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-500 px-2 pb-1"><span>🟩 <span data-i18n="mesh_gw">Gateway (internet)</span></span><span>🔵 <span data-i18n="mesh_relay">Relay</span></span><span>🟡 <span data-i18n="mesh_user">Village (offline)</span></span><span>🔴 <span data-i18n="mesh_pkt">SOS packet</span></span><span>⚪ <span data-i18n="mesh_off">Switched off</span></span></div></div>
+      <div class="space-y-4">
+        <div class="card p-4 space-y-2">
+          <h2 class="font-bold" data-i18n="mesh_send_h">Send an offline SOS</h2>
+          <label class="text-sm" for="meshNode" data-i18n="mesh_from">From village</label>
+          <select id="meshNode"><option value="U1">Village A (boat team)</option><option value="U2">Village B (Kosi basin)</option><option value="U3">Village C (Kankarbagh)</option></select>
+          <button id="meshSend" class="w-full bg-alert hover:bg-red-600 text-white font-bold py-2 rounded-lg" data-i18n="mesh_send">📡 Send through mesh</button>
+          <p class="text-xs text-slate-500" data-i18n="mesh_login">Login required. It becomes a normal SOS when it reaches a gateway.</p>
+        </div>
+        <div id="meshAdmin" class="card p-4 space-y-2 hidden">
+          <h2 class="font-bold">Control room: break the network</h2>
+          <select id="meshCtl"></select>
+          <div class="flex gap-2 flex-wrap"><button id="meshToggle" class="px-3 py-1 rounded-lg border border-slate-300 text-sm">Switch off / on</button><button id="meshNet" class="px-3 py-1 rounded-lg border border-slate-300 text-sm">Gateway internet off / on</button><button id="meshReset" class="px-3 py-1 rounded-lg border border-slate-300 text-sm">Reset</button></div>
+        </div>
+        <div class="card p-4"><h2 class="font-bold mb-2" data-i18n="mesh_log">Messages</h2><ul id="meshLog" class="space-y-2 text-xs"></ul></div>
+      </div>
+    </div>
+    <p class="text-xs text-slate-500 max-w-3xl" data-i18n="mesh_note">Honest note: this is a simulation of the routing idea (shortest path, store-and-forward, self-healing). Real hardware (LoRa / Meshtastic radios) connects through the gateway script and /api/mesh/ingest described in the README.</p>
+  </section>
+
   <!-- ===== HELPLINES + OFFLINE GUIDANCE ===== -->
   <section id="v-help" class="view space-y-4">
     <h1 class="text-3xl font-extrabold" data-i18n="help_title">Emergency Helplines</h1>
@@ -298,6 +325,7 @@ const HI={nav_dash:'डैशबोर्ड',nav_map:'लाइव नक्श
  b_accept:'✋ स्वीकार करें और मदद करें',b_way:'🚗 मैं निकल रहा हूँ',b_reach:'✅ मैं पहुँच गया',b_later:'बाद में',b_close:'बंद करें',b_maps:'🗺 नक्शे में खोलें',taken:'कोई और स्वयंसेवक पहले से मदद कर रहा है।',wait_safe:'व्यक्ति के सुरक्षित होने की पुष्टि का इंतज़ार है।',
  hero_title:'रियल-टाइम अलर्ट। सुरक्षित समुदाय।',hero_sub:'बाढ़ की निगरानी, पूर्व चेतावनी और तेज़ बचाव के लिए एक सामुदायिक प्लेटफ़ॉर्म।',hero_sos:'🚨 SOS भेजें',hero_vol:'🤝 स्वयंसेवक बनें',hero_f1:'🛡 बाढ़ क्षेत्रों की निगरानी',hero_f2:'👥 समुदायों को अलर्ट',hero_f3:'🛟 जान बचाएँ',
  push_banner:'🔔 वेबसाइट बंद होने पर भी बाढ़ की चेतावनी और SOS अलर्ट पाएँ।',push_enable:'चालू करें',push_later:'अभी नहीं',push_turnoff:'बंद करें',push_title:'🔔 बैकग्राउंड अलर्ट',push_body:'वेबसाइट बंद होने पर भी इस डिवाइस पर सायरन चेतावनी, बाढ़ अलर्ट और SOS सूचनाएँ पाएँ। फ़ोन की आवाज़ चालू और Do-Not-Disturb बंद रखें।',push_ios:'iPhone/iPad: Share दबाएँ, "Add to Home Screen" चुनें, फिर RescuNet होम स्क्रीन से खोलकर अलर्ट चालू करें।',push_on:'✅ चालू – वेबसाइट बंद होने पर भी अलर्ट इस डिवाइस तक पहुँचेंगे',push_off:'बंद',push_denied:'ब्राउज़र सेटिंग में ब्लॉक है – इस साइट के लिए सूचनाएँ अनुमति दें',push_noserver:'सर्वर पर अभी सेट नहीं है',push_unsupported:'यह ब्राउज़र बैकग्राउंड अलर्ट सपोर्ट नहीं करता',
+ nav_mesh:'मेश नेटवर्क',mesh_title:'ऑफ़लाइन मेश नेटवर्क',mesh_sub:'जब मोबाइल नेटवर्क और इंटरनेट बंद हो जाते हैं, तो छोटे रेडियो SOS को एक नोड से दूसरे तक पहुँचाते हैं, जब तक वह इंटरनेट वाले गेटवे तक न पहुँच जाए। यह उसी का लाइव सिमुलेशन है।',mesh_gw:'गेटवे (इंटरनेट)',mesh_relay:'रिले',mesh_user:'गाँव (ऑफ़लाइन)',mesh_pkt:'SOS पैकेट',mesh_off:'बंद',mesh_send_h:'ऑफ़लाइन SOS भेजें',mesh_from:'किस गाँव से',mesh_send:'📡 मेश से भेजें',mesh_login:'लॉगिन ज़रूरी। गेटवे तक पहुँचते ही यह सामान्य SOS बन जाता है।',mesh_log:'संदेश',mesh_note:'ध्यान दें: यह रूटिंग के विचार (सबसे छोटा रास्ता, स्टोर-एंड-फ़ॉरवर्ड, खुद सुधार) का सिमुलेशन है। असली हार्डवेयर (LoRa / Meshtastic) README में बताए गेटवे स्क्रिप्ट से जुड़ता है।',fc_rising:'अनुमान: लगभग {m} मिनट में खतरे का स्तर',fc_rate:'बढ़ने की दर',fc_conf_low:'भरोसा: कम',fc_conf_medium:'भरोसा: मध्यम',fc_conf_high:'भरोसा: अधिक',fc_safe:'अभी खतरे का अनुमान नहीं',fc_above:'खतरे के स्तर से ऊपर',fc_need:'पूर्वानुमान के लिए और रीडिंग चाहिए',via_mesh:'📡 मेश से आया',
  off_title:'इंटरनेट नहीं है।',off_body:'इसके बजाय SMS भेजें:',off_nonum:'SMS नंबर सेट नहीं है',
  pri_high:'उच्च प्राथमिकता',pri_medium:'मध्यम',pri_low:'कम',away:'दूर',
  near_a:'📍 आपका इलाका: सबसे नज़दीकी नदी सेंसर',near_b:'सामान्य',away_km:'किमी दूर',outside:'अलर्ट दायरे से बाहर'};
@@ -374,7 +402,20 @@ function renderSensors(){
       <div class="flex items-end justify-between"><div class="text-3xl font-extrabold">${lvl.toFixed(1)} m</div><div class="text-sm">${tr}</div></div>
       <div class="relative h-2 rounded bg-slate-200 my-3"><div class="h-2 rounded" style="width:${pct}%;background:${col}"></div>
         <span class="absolute h-4 w-px bg-orange-400" style="top:-4px;left:${14/18*100}%"></span><span class="absolute h-4 w-px bg-red-500" style="top:-4px;left:${15/18*100}%"></span></div>
+      ${forecastLine(s)}
       <div class="text-xs text-slate-500">${t('updated','Updated')}: ${esc(s.updated_at?s.updated_at.slice(11):t('no_reading','no reading yet'))} · ${t('warn_at','Warning')} 14 m · ${t('danger_at','Danger')} 15 m</div></div>`}).join('');
+}
+function forecastLine(s){      // AI forecast: when will this river reach danger level?
+  const f=s.forecast;if(!f)return '';
+  let txt,cls='text-slate-500';
+  if(f.status==='insufficient_data'){txt=t('fc_need','More readings needed for a forecast')}
+  else if(f.status==='above_danger'){txt='🔴 '+t('fc_above','Above danger level');cls='text-red-500 font-semibold'}
+  else if(f.status==='rising'&&f.eta_danger_min!=null){
+    const r=f.eta_danger_range,rg=r&&r[0]!=null&&r[1]!=null&&r[0]!==r[1]?` (${r[0]}–${r[1]})`:'';
+    txt='🔮 '+t('fc_rising','Forecast: danger level in about {m} min').replace('{m}',f.eta_danger_min+rg)+` · ${t('fc_rate','rate')} ${f.rate_m_per_h>0?'+':''}${f.rate_m_per_h} m/h`;cls=f.eta_danger_min<=60?'text-red-500 font-semibold':'text-orange-500 font-semibold'}
+  else txt='🔮 '+t('fc_safe','No danger expected right now');
+  const conf=f.confidence&&f.confidence!=='none'?` · ${t('fc_conf_'+f.confidence,'confidence: '+f.confidence)}`:'';
+  return `<div class="text-xs mb-1 ${cls}">${txt}${conf}${f.demo_timing&&f.points>=3?' <span class="text-slate-500">(demo timing)</span>':''}</div>`;
 }
 function campWarnings(c){
   const p=Math.round(c.occupied/c.capacity*100),w=[];
@@ -420,7 +461,7 @@ function renderAuth(){
   if($('logoutBtn'))$('logoutBtn').onclick=async()=>{await api('/api/auth/logout',{endpoint:pushSub?pushSub.endpoint:null});location.reload()};
   $('volLink').classList.toggle('hidden',!!m);
 }
-function renderAll(){renderAuth();renderStats();renderSensors();renderCamps();renderNotifs();renderTeams();renderHelp();renderMySos();renderNear();renderSos();drawMaps()}
+function renderAll(){renderAuth();renderStats();renderSensors();renderCamps();renderNotifs();renderTeams();renderHelp();renderMySos();renderNear();renderSos();renderMesh();drawMaps()}
 
 /* ---------- Toasts ---------- */
 function toast(msg,kind){
@@ -463,7 +504,7 @@ function renderSos(){
   if(!open)return;
   const a=l[popIdx],mine=a.volunteer_id===S.me.id,taken=a.volunteer_id&&!mine;
   $('popNav').textContent=l.length>1?`${popIdx+1} / ${l.length}`:'';
-  $('popBody').innerHTML=`<div class="mb-2">${priBadge(a.priority)}</div><div class="text-3xl font-extrabold mb-1">${urg(a.urgency_level)}</div>
+  $('popBody').innerHTML=`<div class="mb-2">${priBadge(a.priority)}${a.via==='mesh'?` <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 font-bold">${t('via_mesh','📡 via mesh')}${a.mesh_path?' · '+esc(a.mesh_path.length>2?(a.mesh_path.length-1)+' hops':a.mesh_path.join(' · ')):''}</span>`:''}</div><div class="text-3xl font-extrabold mb-1">${urg(a.urgency_level)}</div>
     <div class="text-lg font-semibold">${esc(a.name)}${mine&&a.phone?' · 📞 '+esc(a.phone):''}</div>
     <div class="text-slate-500 mt-1">${a.distance_km!=null?'<b>'+a.distance_km+' km</b> '+t('away','away')+' · ':''}${a.latitude.toFixed(5)}, ${a.longitude.toFixed(5)}${a.accuracy_m!=null?' (GPS ±'+a.accuracy_m+' m)':''}</div>
     <div class="mt-3 inline-block text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">${stTxt(a.status)}${a.volunteer_name?' · '+esc(a.volunteer_name):''}</div>
@@ -519,6 +560,46 @@ async function checkSession(){
 }
 window.addEventListener('focus',checkSession);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkSession()});
+
+/* ---------- Mesh network view (simulation) ---------- */
+let MESH=null,meshSel=null;
+const KIND_STYLE={gateway:'#38A169',relay:'#1E6FE0',user:'#ECC94B'};
+function meshXY(n){const lat=MESH.nodes.map(x=>x.lat),lng=MESH.nodes.map(x=>x.lng),a=Math.min(...lat),b=Math.max(...lat),c=Math.min(...lng),d=Math.max(...lng);
+  return [60+(n.lng-c)/(d-c)*680,400-(n.lat-a)/(b-a)*340]}
+function renderMesh(){
+  if(!MESH)return;
+  const byId=Object.fromEntries(MESH.nodes.map(n=>[n.id,n])),pos=Object.fromEntries(MESH.nodes.map(n=>[n.id,meshXY(n)]));
+  const sos=MESH.messages.filter(m=>m.kind==='sos'&&(m.status==='moving'||m.status==='waiting')),alerts=MESH.messages.filter(m=>m.kind==='alert'&&m.status==='moving');
+  const hot=new Set();sos.forEach(m=>{for(let i=0;i<m.path.length-1;i++)hot.add(m.path[i]+'|'+m.path[i+1])});
+  const lit=new Set();alerts.forEach(m=>Object.keys(m.reached).forEach(k=>lit.add(k)));
+  let h='';
+  MESH.links.forEach(([a,b])=>{const on=hot.has(a+'|'+b)||hot.has(b+'|'+a);h+=`<line x1="${pos[a][0]}" y1="${pos[a][1]}" x2="${pos[b][0]}" y2="${pos[b][1]}" stroke="${on?'#E53E3E':'#8aa0bf'}" stroke-width="${on?4:1.5}" stroke-opacity="${on?1:.55}"/>`});
+  MESH.nodes.forEach(n=>{const[x,y]=pos[n.id],col=!n.online?'#9aa5b5':KIND_STYLE[n.kind],noInternet=n.kind==='gateway'&&!n.internet;
+    h+=`<g data-node="${n.id}" style="cursor:pointer">`+(lit.has(n.id)?`<circle cx="${x}" cy="${y}" r="26" fill="none" stroke="#E53E3E" stroke-width="3" stroke-dasharray="4 3"/>`:'')
+      +(n.id===meshSel?`<circle cx="${x}" cy="${y}" r="24" fill="none" stroke="#fff" stroke-width="2"/>`:'')
+      +(n.kind==='gateway'?`<rect x="${x-15}" y="${y-15}" width="30" height="30" rx="7" fill="${col}" stroke="#fff" stroke-width="2"/>`:`<circle cx="${x}" cy="${y}" r="${n.kind==='user'?15:11}" fill="${col}" stroke="#fff" stroke-width="2"/>`)
+      +`<text x="${x}" y="${y+5}" text-anchor="middle" font-size="13" fill="#fff">${!n.online?'✕':noInternet?'⌀':n.kind==='gateway'?'🌐':n.kind==='user'?'📱':'📡'}</text>`
+      +`<text x="${x}" y="${y+34}" text-anchor="middle" font-size="11" fill="currentColor">${esc(n.name.replace(/ \(.*\)/,''))}</text></g>`});
+  sos.forEach(m=>{const[x,y]=pos[m.at];h+=`<circle cx="${x}" cy="${y-22}" r="8" fill="#E53E3E" stroke="#fff" stroke-width="2"><animate attributeName="r" values="6;10;6" dur="1s" repeatCount="indefinite"/></circle>`});
+  $('meshSvg').innerHTML=h;
+  $('meshSvg').querySelectorAll('[data-node]').forEach(g=>g.onclick=()=>{meshSel=g.dataset.node;$('meshCtl').value=meshSel;renderMesh()});
+  const ST={moving:'📡 moving',waiting:'⏳ waiting (no path yet)',delivered:'✅ delivered',dropped:'✖ dropped'};
+  $('meshLog').innerHTML=MESH.messages.length?MESH.messages.map(m=>m.kind==='sos'
+    ?`<li class="rounded-lg bg-slate-50 border border-slate-200 p-2"><b>SOS #${m.id}</b> ${esc(m.name)} · ${ST[m.status]}<br><span class="text-slate-500">${m.path_names.map(esc).join(' → ')} · ${m.hops} hop(s)${m.alert_id?' · SOS #'+m.alert_id+' created':''}</span></li>`
+    :`<li class="rounded-lg bg-red-50 border border-red-200 p-2"><b>🚨 Alert</b> · ${ST[m.status]}<br><span class="text-slate-500">${Object.keys(m.reached).length}/${MESH.nodes.length} nodes reached</span></li>`).join(''):'<li class="text-slate-500">—</li>';
+  $('meshAdmin').classList.toggle('hidden',!(S.me&&S.me.role==='admin'));
+  if(!$('meshCtl').options.length)$('meshCtl').innerHTML=MESH.nodes.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join('');
+}
+async function loadMesh(){try{MESH=await (await fetch('/api/mesh/state')).json();renderMesh()}catch(e){}}
+$('meshSend').onclick=async()=>{
+  if(!S.me){location.href='/login?next=/';return}
+  const r=await api('/api/mesh/send',{node_id:$('meshNode').value,urgency_level:'critical_medical'});if(r.error)toast(r.error,'danger');
+};
+const ctl=async b=>{const r=await api('/api/admin/mesh/node',{node_id:$('meshCtl').value,...b});if(r.error)toast(r.error,'danger')};
+$('meshToggle').onclick=()=>{const n=MESH.nodes.find(x=>x.id===$('meshCtl').value);ctl({online:!n.online})};
+$('meshNet').onclick=()=>{const n=MESH.nodes.find(x=>x.id===$('meshCtl').value);if(n.kind!=='gateway')return toast('Choose a gateway node','warn');ctl({internet:!n.internet})};
+$('meshReset').onclick=async()=>{await api('/api/admin/mesh/reset')};
+if(typeof socket!=='undefined'){}
 
 /* ---------- Background alerts (Web Push + service worker) ---------- */
 const pushOK=()=>'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
@@ -586,8 +667,9 @@ socket.on('sos_update',u=>{
   const i=S.alerts.findIndex(x=>x.id===u.id);
   if(i>-1){if(u.status==='resolved')S.alerts.splice(i,1);else Object.assign(S.alerts[i],{status:u.status,volunteer_id:u.volunteer_id,volunteer_name:u.volunteer_name});renderSos();drawMaps()}
 });
-socket.on('flood_warning',w=>toast((w.severity==='rising'?'🌊 ':'⚠️ ')+((LANG==='hi'&&w.message_hi)||w.message),'warn'));
+socket.on('flood_warning',w=>toast((w.severity==='rising'?'🌊 ':w.severity==='predicted'?'🔮 ':'⚠️ ')+((LANG==='hi'&&w.message_hi)||w.message),'warn'));
 socket.on('nearest_sensor',n=>{S.near=n;renderNear()});
+socket.on('mesh_update',m=>{MESH=m;renderMesh()});
 
 /* ---------- Actions ---------- */
 const open_=id=>$(id).classList.remove('hidden'),close_=id=>$(id).classList.add('hidden');
@@ -628,7 +710,7 @@ $('armBtn2').onclick=()=>arm();
 $('themeBtn').onclick=()=>{const d=document.documentElement.classList.toggle('dark');try{localStorage.setItem('rn-theme',d?'dark':'light')}catch(e){}};
 
 /* ---------- Init ---------- */
-makeMap('mapMini');makeMap('mapFull');applyLang();
+makeMap('mapMini');makeMap('mapFull');applyLang();loadMesh();
 fetch('/api/state').then(r=>r.json()).then(d=>{
   Object.assign(S,d);S.mySos=d.my_sos||null;S.vapid=d.vapid_public_key||'';S.ready=true;renderAll();updateOffline();
   if(isVol()){const w=liveSos().find(a=>a.status==='open'||a.volunteer_id===S.me.id);if(w)openSosPopup(w.id);

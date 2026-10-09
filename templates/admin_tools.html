@@ -27,6 +27,16 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #fff;
     <p id="tRes" class="text-xs text-green-300"></p>
   </section>
   <section class="card p-5 space-y-2 md:col-span-2">
+    <h2 class="text-xl font-bold">Flood simulator (demo)</h2>
+    <p class="text-xs text-slate-400">Feeds a realistic series of water-level readings (one every few seconds, treated as 10 minutes apart) so you can show the AI forecast, the early warning and then the automatic siren. Open the public site in another window first.</p>
+    <div class="grid sm:grid-cols-3 gap-2">
+      <div><label class="text-xs" for="simSensor">Sensor</label><select id="simSensor" class="w-full" style="background:#0B192C;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px;color:#fff"><option value="1">Ganges River Gauge</option><option value="2">Kosi Basin Level</option></select></div>
+      <div><label class="text-xs" for="simScen">Scenario</label><select id="simScen" class="w-full" style="background:#0B192C;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px;color:#fff"><option value="rising">Steady rise (16 readings)</option><option value="flash">Flash flood (9 readings)</option><option value="recede">River recedes</option></select></div>
+      <div class="flex items-end gap-2"><button id="simGo" class="flex-1 py-2 rounded bg-white/15 hover:bg-white/25 font-semibold">Start</button><button id="simStop" class="flex-1 py-2 rounded border border-white/30">Stop</button></div>
+    </div>
+    <p id="simRes" class="text-xs text-green-300"></p>
+  </section>
+  <section class="card p-5 space-y-2 md:col-span-2">
     <h2 class="text-xl font-bold">Test background push</h2>
     <p class="text-xs text-slate-400">First turn on "Background alerts" on this device (public site, Settings). Then close the website tab and press the button: a notification should appear.</p>
     <button id="pSend" class="px-5 py-2 rounded bg-white/15 hover:bg-white/25 font-semibold">Send test notification to my devices</button>
@@ -45,6 +55,9 @@ const $=id=>document.getElementById(id);
 const api=async(u,b)=>{try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const d=await r.json();if(!r.ok)alert(d.error||'Error');return d}catch(e){alert('Network error');return{}}};
 $('smSend').onclick=async()=>{const d=await api('/api/admin/sms/simulate',{from:$('smFrom').value,body:$('smBody').value});if(d.reply)$('smReply').textContent='Reply: '+d.reply};
 $('tSend').onclick=async()=>{const d=await api('/api/admin/sms/test',{phone:$('tPhone').value});if(d.ok)$('tRes').textContent='Status: '+d.status};
+$('simGo').onclick=async()=>{const d=await api('/api/admin/simulate',{sensor_id:+$('simSensor').value,scenario:$('simScen').value});if(d.ok)$('simRes').textContent=`Started (${d.steps} readings). Watch the control room page.`};
+$('simStop').onclick=async()=>{await api('/api/admin/simulate',{stop:true})};
+setInterval(async()=>{try{const d=await (await fetch('/api/admin/simulate')).json();if(d.running)$('simRes').textContent=`Running: reading ${d.step}/${d.total} (${d.scenario})`}catch(e){}},2000);
 $('pSend').onclick=async()=>{const d=await api('/api/admin/push/test');if(d.ok)$('pRes').textContent=d.configured?`Sent to ${d.devices} device(s) of yours.`:'Push is not configured on the server (VAPID keys missing).'};
 $('cSend').onclick=async()=>{const d=await api('/api/admin/users',{name:$('cName').value,username:$('cUser').value,password:$('cPass').value});if(d.ok){$('cRes').textContent='Created: '+d.user.name+' (camp_manager)';$('cPass').value=''}};
 </script></body></html>

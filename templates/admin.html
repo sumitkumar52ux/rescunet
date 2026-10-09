@@ -116,10 +116,24 @@ function rStatus(){
   else if(warn.length){el.className='rounded-xl px-5 py-3 font-bold text-lg bg-orange-600';el.innerHTML='🟠 WARNING – '+warn.map(s=>esc(s.name)+' '+s.current_level.toFixed(1)+' m').join(', ')+ls}
   else{el.className='rounded-xl px-5 py-3 font-bold text-lg bg-green-800';el.innerHTML='🟢 All sensors normal'+ls}
 }
+/* ---- AI forecast: text + sparkline (history, thresholds, dashed 1-hour projection) ---- */
+function fcLine(s){const f=s.forecast;if(!f)return '';
+  if(f.status==='insufficient_data')return '<div class="text-xs text-slate-400">🔮 Forecast: '+esc(f.note||'need more readings')+'</div>';
+  let tx,c='text-slate-300';
+  if(f.status==='above_danger'){tx='🔴 Above danger level';c='text-red-400 font-bold'}
+  else if(f.status==='rising'&&f.eta_danger_min!=null){const r=f.eta_danger_range,rg=r&&r[0]!=null&&r[1]!=null&&r[0]!==r[1]?` (range ${r[0]}–${r[1]} min)`:'';tx=`🔮 Danger level in about <b>${f.eta_danger_min} min</b>${rg} · ${f.rate_m_per_h>0?'+':''}${f.rate_m_per_h} m/h`;c=f.eta_danger_min<=60?'text-red-400':'text-orange-300'}
+  else tx='🔮 '+esc(f.note)+(f.rate_m_per_h!=null?` · ${f.rate_m_per_h>0?'+':''}${f.rate_m_per_h} m/h`:'');
+  return `<div class="text-xs mb-1 ${c}">${tx} · confidence ${esc(f.confidence)} (${f.points} readings${f.r2!=null?', fit R²='+f.r2:''})${f.demo_timing?' · demo timing':''}</div>`}
+function spark(s){const f=s.forecast;if(!f||!f.history||f.history.length<2)return '';
+  const H=f.history,W=240,Ht=60,lo=9,hi=17,n=H.length,steps=6,tot=n-1+steps,X=i=>6+i/tot*(W-12),Y=v=>Ht-4-(Math.min(Math.max(v,lo),hi)-lo)/(hi-lo)*(Ht-8);
+  const d=H.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  const proj=f.rate_m_per_h!=null&&Math.abs(f.rate_m_per_h)>=.15?`<path d="M${X(n-1).toFixed(1)} ${Y(H[n-1]).toFixed(1)} L${X(n-1+steps).toFixed(1)} ${Y(H[n-1]+f.rate_m_per_h).toFixed(1)}" stroke="#fbd38d" stroke-width="2" stroke-dasharray="4 3" fill="none"/>`:'';
+  return `<svg viewBox="0 0 ${W} ${Ht}" class="w-full h-14 my-1" role="img" aria-label="River level history and 1 hour projection"><line x1="0" x2="${W}" y1="${Y(14)}" y2="${Y(14)}" stroke="#ED8936" stroke-dasharray="2 3"/><line x1="0" x2="${W}" y1="${Y(15)}" y2="${Y(15)}" stroke="#E53E3E" stroke-dasharray="2 3"/><path d="${d}" stroke="#63b3ed" stroke-width="2.5" fill="none"/>${proj}</svg>`}
 function rSensors(){$('sensors').innerHTML=S.sensors.map(s=>{const p=Math.min(100,s.current_level/18*100),tr=s.trend>=.2?`▲ +${s.trend.toFixed(1)} m rising`:s.trend<=-.2?`▼ ${s.trend.toFixed(1)} m falling`:'● steady';
   return `<div class="rounded-xl bg-[#0B192C] p-4"><div class="flex justify-between"><b>${esc(s.name)}</b><span class="text-xs uppercase font-bold" style="color:${levelColor(s.current_level)}">${s.state}</span></div>
   <div class="flex items-end justify-between my-2"><div class="text-3xl font-extrabold">${s.current_level.toFixed(1)} m</div><div class="text-sm text-slate-300">${tr}</div></div>
   <div class="relative h-2 rounded bg-white/15 mb-1"><div class="h-2 rounded" style="width:${p}%;background:${levelColor(s.current_level)}"></div><span class="absolute h-4 w-px bg-orange-400" style="top:-4px;left:${14/18*100}%"></span><span class="absolute h-4 w-px bg-red-500" style="top:-4px;left:${15/18*100}%"></span></div>
+  ${fcLine(s)}${spark(s)}
   <div class="text-xs text-slate-400 mb-2">Updated: ${esc(s.updated_at?s.updated_at.slice(11):'no reading yet')}</div>
   <div class="flex gap-2"><input id="lvl${s.id}" type="number" step="0.1" min="0" max="50" placeholder="New level (m)" aria-label="New level for ${esc(s.name)}"><button onclick="setLevel(${s.id})" class="px-4 rounded bg-white/15 hover:bg-white/25 font-semibold">Update</button></div></div>`}).join('');rStatus()}
 async function setLevel(id){const v=parseFloat($('lvl'+id).value);if(isNaN(v)||v<0||v>50)return alert('Enter a level between 0 and 50 metres');
@@ -131,10 +145,12 @@ function rSos(){
   $('volTotal').textContent=S.volunteers_list.length;$('volLoc').textContent=S.volunteers_list.filter(v=>v.lat!=null).length;
   const list=[...S.alerts].sort((a,b)=>(PO[a.priority]??2)-(PO[b.priority]??2)||b.id-a.id);
   $('sos').innerHTML=list.length?list.map(a=>{
-    const vs=S.volunteers_list.map(v=>({...v,d:v.lat!=null?km(a.latitude,a.longitude,v.lat,v.lng):null})).sort((x,y)=>(x.d??1e9)-(y.d??1e9));
-    const opts=vs.map(v=>`<option value="${v.id}">${esc(v.name)} (${esc(v.skill)})${v.d!=null?' – '+v.d.toFixed(1)+' km':' – no location'}</option>`).join('');
+    // rule-based suggestion: nearest volunteer, with a bonus when the skill fits the emergency
+    const want={critical_medical:['medical'],stranded_food_needed:['food','boat'],general:[]}[a.urgency_level]||[];
+    const vs=S.volunteers_list.map(v=>({...v,d:v.lat!=null?km(a.latitude,a.longitude,v.lat,v.lng):null})).sort((x,y)=>((x.d??50)-(want.includes(x.skill)?4:0))-((y.d??50)-(want.includes(y.skill)?4:0)));
+    const opts=vs.map((v,i)=>`<option value="${v.id}">${i===0?'★ Recommended: ':''}${esc(v.name)} (${esc(v.skill)})${v.d!=null?' – '+v.d.toFixed(1)+' km':' – no location'}</option>`).join('');
     return `<li class="rounded-xl bg-[#0B192C] p-3 space-y-2"><div class="flex flex-wrap justify-between gap-2 items-center">
-      <span><span class="text-xs px-2 py-1 rounded-full font-bold ${PRI[a.priority]||PRI.low}">${(a.priority||'low').toUpperCase()}</span> <b class="ml-1">${URG[a.urgency_level]}</b></span>
+      <span><span class="text-xs px-2 py-1 rounded-full font-bold ${PRI[a.priority]||PRI.low}">${(a.priority||'low').toUpperCase()}</span> <b class="ml-1">${URG[a.urgency_level]}</b>${a.via==='mesh'?` <span class="text-[11px] px-2 py-0.5 rounded-full bg-blue-600 font-bold">📡 via mesh${a.mesh_path?' · '+esc(a.mesh_path.length>2?(a.mesh_path.length-1)+' hops':a.mesh_path.join(' · ')):''}</span>`:''}</span>
       <span class="text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-300">${a.status.replace(/_/g,' ')}${a.volunteer_name?' · '+esc(a.volunteer_name):''}</span></div>
       <div class="text-slate-300">${esc(a.name)} ${esc(a.phone)} · GPS ${a.latitude.toFixed(5)}, ${a.longitude.toFixed(5)}${a.accuracy_m!=null?' (±'+a.accuracy_m+' m)':''}<br><span class="text-slate-400 text-xs">${esc(a.created_at.slice(11))} · ${a.volunteers_notified} volunteer(s) alerted</span></div>
       <div class="flex flex-wrap gap-2 items-center"><select id="dv${a.id}" class="max-w-[16rem]">${opts||'<option value="">No volunteers</option>'}</select>

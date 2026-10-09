@@ -13,7 +13,9 @@ import hmac
 import logging
 import math
 import os
+import random
 import re
+import threading
 import secrets
 import time
 from datetime import datetime
@@ -25,6 +27,8 @@ from flask import (Flask, Response, abort, jsonify, redirect, render_template, r
 from flask_socketio import SocketIO, join_room
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import forecast     # AI forecast (forecast.py): predicts when a river reaches danger level
+import mesh         # Mesh network (mesh.py): simulation + gateway bridge
 import push         # Web Push (push.py): alerts even when the website is closed
 import sms          # SMS layer (sms.py): alerts to phones without internet
 
@@ -56,6 +60,10 @@ WATCH_LEVEL = 12.0      # "rising fast" warnings only matter from this level upw
 RISE_STEP_M = 0.5       # a jump of this much between two readings counts as "rising fast"
 SIREN_REPEAT_S = 120    # while a river stays above danger level, repeat the siren at most this often
 WARN_REPEAT_S = 120     # same for "rising fast" warnings
+PREDICT_WITHIN_MIN = 60 # AI early warning when danger level is forecast within this many minutes
+PREDICT_REPEAT_S = 600  # ...and at most once per 10 minutes per sensor
+SIM_TICK_S = float(os.environ.get("SIM_TICK_S", "3"))   # flood simulator speed (seconds between readings)
+MESH_GATEWAY_KEY = os.environ.get("MESH_GATEWAY_KEY", "mesh-demo-key")   # used by a real LoRa gateway
 
 # --------------------------------------------------------------------------
 # In-memory "database" (each structure mirrors a table)
@@ -77,7 +85,7 @@ iot_water_sensors = {
     2: {"id": 2, "name": "Kosi Basin Level", "lat": 25.5400, "lng": 85.2600, "current_level": 10.0, "baseline": 10.0,
         "warning_level": 14.0, "danger_level": 15.0, "state": "normal", "trend": 0.0, "updated_at": None},
 }
-sensor_meta = {sid: {"last_siren": 0.0, "last_warn": 0.0} for sid in iot_water_sensors}   # internal, not sent to clients
+sensor_meta = {sid: {"last_siren": 0.0, "last_warn": 0.0, "last_predict": 0.0} for sid in iot_water_sensors}   # internal, not sent to clients
 connected = set()          # socket ids currently connected
 client_locations = {}      # socket id -> (lat, lng) for users who allowed location
 flood_zones = {
@@ -228,16 +236,20 @@ def push_targets_for_users(ids):
     return [sub for sub in list(push.subs) if sub["user_id"] in ids]
 
 
+WARNING_TITLES = {"rising": ("🌊 Water rising fast", "🌊 पानी तेज़ी से बढ़ रहा है"),
+                  "predicted": ("🔮 Flood forecast", "🔮 बाढ़ पूर्वानुमान"),
+                  "warning": ("⚠️ Flood warning", "⚠️ बाढ़ की चेतावनी")}
+
+
 def emit_warning(sids, severity, message, message_hi=None, sensor=None):
     for sid in sids:
         socketio.emit("flood_warning", {"severity": severity, "message": message, "message_hi": message_hi,
                                         "timestamp": now()}, to=sid)
     if sensor:       # also reaches phones where the website is closed
-        rising = severity == "rising"
+        titles = WARNING_TITLES.get(severity, WARNING_TITLES["warning"])
         push.notify(push_targets_for_sensor(sensor), {
             "kind": "warning", "tag": "warning", "url": "/", "urgent": False,
-            "title": "🌊 Water rising fast" if rising else "⚠️ Flood warning",
-            "title_hi": "🌊 पानी तेज़ी से बढ़ रहा है" if rising else "⚠️ बाढ़ की चेतावनी",
+            "title": titles[0], "title_hi": titles[1],
             "body": message, "body_hi": message_hi})
 
 
@@ -255,6 +267,7 @@ def broadcast_emergency(message, source, sids=None, message_hi=None, sensor=None
     push.notify(push_targets_for_sensor(sensor) if sensor else list(push.subs), {
         "kind": "siren", "tag": "siren", "url": "/#siren", "urgent": True,
         "title": "🚨 FLOOD EMERGENCY", "title_hi": "🚨 बाढ़ आपातकाल", "body": message, "body_hi": message_hi})
+    mesh.flood_alert(message)        # ...and out through the radio mesh (simulation + real gateway outbox)
 
 
 # --------------------------------------------------------------------------
@@ -528,7 +541,7 @@ def notify_volunteers(alert, vids):
         "body": f"{alert['urgency_level'].replace('_', ' ')} - {alert['name']}. Open RescuNet to accept."})
 
 
-def create_sos(owner, name, phone, lat, lng, urgency, ack=True, accuracy=None):
+def create_sos(owner, name, phone, lat, lng, urgency, ack=True, accuracy=None, via="app", mesh_path=None):
     """Save an SOS and alert nearby volunteers + admins (app popup AND SMS). Never sounds the siren.
     owner = the user dict, or None for an unregistered person who sent the SOS by SMS."""
     notified = set()
@@ -540,7 +553,7 @@ def create_sos(owner, name, phone, lat, lng, urgency, ack=True, accuracy=None):
             notified.add(v["id"])
     alert = {"id": next(_ids["alert"]), "user_id": owner["id"] if owner else None, "name": name, "phone": phone,
              "latitude": lat, "longitude": lng, "accuracy_m": accuracy, "urgency_level": urgency,
-             "priority": PRIORITY.get(urgency, "low"), "status": "open",
+             "priority": PRIORITY.get(urgency, "low"), "via": via, "mesh_path": mesh_path, "status": "open",
              "volunteer_id": None, "volunteer_name": None, "created_at": now(),
              "volunteers_notified": len(notified), "_notified": notified}
     distress_alerts.append(alert)
@@ -662,27 +675,17 @@ def community_report():
 # --------------------------------------------------------------------------
 # IoT sensors: admin session OR hardware key
 # --------------------------------------------------------------------------
-@app.route("/api/sensors/update", methods=["POST"])
-def update_sensor():
-    u = current_user()
-    key_ok = hmac.compare_digest(request.headers.get("X-IoT-Key", ""), IOT_API_KEY)
-    if not (key_ok or (u and u["role"] == "admin")):
-        return (jsonify(error="Login required"), 401) if not u else (jsonify(error="Forbidden: admins or IoT devices only"), 403)
-    d = request.get_json(silent=True) or {}
-    try:
-        sensor = iot_water_sensors[int(d["sensor_id"])]
-        level = float(d["current_level"])
-        assert 0 <= level <= 50
-    except (KeyError, TypeError, ValueError, AssertionError):
-        return jsonify(error="valid sensor_id and current_level (0-50 m) required"), 400
-
+def apply_reading(sensor, level, actor, ts=None):
+    """Store one water-level reading and run everything that follows from it: state, forecast, warnings, siren."""
     meta = sensor_meta[sensor["id"]]
     prev_level, prev_state = sensor["current_level"], sensor["state"]
     sensor["current_level"], sensor["updated_at"] = round(level, 2), now()
     sensor["state"] = sensor_state(sensor)
     sensor["trend"] = round(level - prev_level, 2)
     rising = sensor["trend"] >= RISE_STEP_M and level >= WATCH_LEVEL and sensor["state"] != "critical"
-    audit(u["username"] if u and not key_ok else "iot-device", "sensor_update", f"{sensor['name']} = {level:.1f} m")
+    audit(actor, "sensor_update", f"{sensor['name']} = {level:.1f} m")
+    forecast.record(sensor["id"], level, ts)
+    sensor["forecast"] = forecast.predict(sensor["id"], sensor["warning_level"], sensor["danger_level"])
     socketio.emit("sensor_update", sensor)
     refresh_zones()
 
@@ -715,7 +718,42 @@ def update_sensor():
         push_notification("warning", "Flood warning", msg)
         emit_warning(targets, severity, msg, msg_hi, sensor=sensor)
         sms.send_many(sms_recipients_for_sensor(sensor), f"RescuNet warning: {msg}", "warning")
-    return jsonify(ok=True, sensor=sensor, emergency=emergency, clients_in_range=len(targets))
+
+    # AI forecast: warn EARLY (about 30-60 minutes before) when the trend model expects danger level soon.
+    # It only sends a warning - the siren stays with the real danger level or with the control room.
+    fc = sensor["forecast"]
+    if (sensor["state"] != "critical" and fc["status"] == "rising" and fc["confidence"] in ("medium", "high")
+            and fc["eta_danger_min"] is not None and fc["eta_danger_min"] <= PREDICT_WITHIN_MIN
+            and t - meta["last_predict"] >= PREDICT_REPEAT_S):
+        meta["last_predict"] = t
+        eta = max(5, int(round(fc["eta_danger_min"] / 5.0)) * 5)
+        msg = (f"AI forecast: {sensor['name']} is rising about {fc['rate_m_per_h']:.1f} m/hour and may reach danger level "
+               f"({sensor['danger_level']:.0f} m) in about {eta} minutes. Prepare to evacuate.")
+        msg_hi = (f"पूर्वानुमान: {sensor['name']} का जल स्तर लगभग {fc['rate_m_per_h']:.1f} मीटर/घंटा बढ़ रहा है और लगभग {eta} मिनट में "
+                  f"खतरे के स्तर ({sensor['danger_level']:.0f} मीटर) तक पहुँच सकता है। निकलने की तैयारी करें।")
+        push_notification("warning", "Flood forecast", msg)
+        emit_warning(targets, "predicted", msg, msg_hi, sensor=sensor)
+        sms.send_many(sms_recipients_for_sensor(sensor), f"RescuNet FORECAST: {msg}", "forecast")
+        audit("system", "AI_FORECAST_WARNING", f"{sensor['name']}: danger in ~{eta} min (confidence {fc['confidence']})")
+    return {"emergency": emergency, "clients": len(targets)}
+
+
+@app.route("/api/sensors/update", methods=["POST"])
+def update_sensor():
+    u = current_user()
+    key_ok = hmac.compare_digest(request.headers.get("X-IoT-Key", ""), IOT_API_KEY)
+    if not (key_ok or (u and u["role"] == "admin")):
+        return (jsonify(error="Login required"), 401) if not u else (jsonify(error="Forbidden: admins or IoT devices only"), 403)
+    d = request.get_json(silent=True) or {}
+    try:
+        sensor = iot_water_sensors[int(d["sensor_id"])]
+        level = float(d["current_level"])
+        assert 0 <= level <= 50
+    except (KeyError, TypeError, ValueError, AssertionError):
+        return jsonify(error="valid sensor_id and current_level (0-50 m) required"), 400
+
+    res = apply_reading(sensor, level, u["username"] if u and not key_ok else "iot-device")
+    return jsonify(ok=True, sensor=sensor, emergency=res["emergency"], clients_in_range=res["clients"])
 
 
 # --------------------------------------------------------------------------
@@ -824,6 +862,164 @@ def sms_test():
     rec = sms.send_sms(phone, "RescuNet test message: SMS alerts are working.", "test")
     audit(current_user()["username"], "sms_test", rec["to"])
     return jsonify(ok=True, status=rec["status"])
+
+
+# --------------------------------------------------------------------------
+# Flood simulator (demo): feeds a realistic rising/receding series so the AI forecast and warnings can be shown
+# --------------------------------------------------------------------------
+sim = {"running": False, "stop": False, "sensor_id": None, "scenario": None, "step": 0, "total": 0}
+
+
+def sim_levels(scenario):
+    rnd = random.Random(7)
+    if scenario == "recede":
+        lv = [15.6 - 0.45 * i + rnd.uniform(-.05, .05) for i in range(12)]
+    elif scenario == "flash":
+        lv = [10 + 0.8 * i + rnd.uniform(-.08, .08) for i in range(9)]
+    else:
+        lv = [10 + 0.42 * i + rnd.uniform(-.06, .06) for i in range(16)]
+    return [round(max(v, 0), 2) for v in lv]
+
+
+def run_simulation(sensor, scenario):
+    levels = sim_levels(scenario)
+    sim.update(running=True, stop=False, sensor_id=sensor["id"], scenario=scenario, step=0, total=len(levels))
+    meta = sensor_meta[sensor["id"]]
+    forecast.reset(sensor["id"])
+    meta.update(last_siren=0.0, last_warn=0.0, last_predict=0.0)
+    sensor.update(current_level=levels[0], state="normal", trend=0.0)
+    base = time.time() - 600 * len(levels)           # pretend the readings were 10 minutes apart, ending now
+    try:
+        for i, lv in enumerate(levels):
+            if sim["stop"]:
+                break
+            sim["step"] = i + 1
+            apply_reading(sensor, lv, "simulator", ts=base + 600 * (i + 1))
+            time.sleep(SIM_TICK_S)
+    finally:
+        sim["running"] = False
+        audit("simulator", "SIMULATION_END", f"{sensor['name']} ({scenario})")
+
+
+@app.route("/api/admin/simulate", methods=["GET", "POST"])
+@api_roles("admin")
+def simulate():
+    if request.method == "GET":
+        return jsonify(sim)
+    d = request.get_json(silent=True) or {}
+    if d.get("stop"):
+        sim["stop"] = True
+        return jsonify(ok=True, **sim)
+    if sim["running"]:
+        return jsonify(error="A simulation is already running"), 409
+    try:
+        sensor = iot_water_sensors[int(d["sensor_id"])]
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="Choose a sensor"), 400
+    scenario = d.get("scenario", "rising")
+    if scenario not in ("rising", "flash", "recede"):
+        return jsonify(error="scenario must be rising, flash or recede"), 400
+    audit(current_user()["username"], "SIMULATION_START", f"{sensor['name']} ({scenario})")
+    threading.Thread(target=run_simulation, args=(sensor, scenario), daemon=True).start()
+    return jsonify(ok=True, sensor_id=sensor["id"], scenario=scenario, steps=len(sim_levels(scenario)))
+
+
+# --------------------------------------------------------------------------
+# Mesh network (simulation for the demo + bridge for a real LoRa gateway)
+# --------------------------------------------------------------------------
+mesh_last = {}      # who -> time of last mesh SOS (anti-spam)
+
+
+def _mesh_deliver(m):
+    """An SOS reached a gateway that has internet: it becomes a normal RescuNet SOS."""
+    names = [mesh.NODES[p]["name"] for p in m["path"]]
+    a = create_sos(None, m["name"], "", m["lat"], m["lng"], m["urgency"], ack=False, via="mesh", mesh_path=names)
+    m["alert_id"] = a["id"]
+
+
+mesh.configure(on_deliver=_mesh_deliver, on_update=lambda: socketio.emit("mesh_update", mesh.state()))
+
+
+@app.route("/api/mesh/state")
+def mesh_state():
+    return jsonify(mesh.state())
+
+
+@app.route("/api/mesh/send", methods=["POST"])
+@api_roles("citizen", "volunteer")
+def mesh_send():
+    """Demo: send an SOS from a village node through the (simulated) offline mesh."""
+    u, d = current_user(), request.get_json(silent=True) or {}
+    if time.time() - mesh_last.get(u["id"], 0) < 20:
+        return jsonify(error="Please wait 20 seconds between mesh SOS messages"), 429
+    urgency = d.get("urgency_level", "general")
+    if urgency not in URGENCY_LEVELS:
+        return jsonify(error="invalid urgency"), 400
+    m, err = mesh.send_sos(d.get("node_id"), u["name"], urgency)
+    if err:
+        return jsonify(error=err), 400
+    mesh_last[u["id"]] = time.time()
+    return jsonify(ok=True, message_id=m["id"])
+
+
+@app.route("/api/admin/mesh/node", methods=["POST"])
+@api_roles("admin")
+def mesh_node():
+    d = request.get_json(silent=True) or {}
+    if not mesh.set_node(d.get("node_id"), d.get("online"), d.get("internet")):
+        return jsonify(error="Unknown node"), 404
+    audit(current_user()["username"], "mesh_node", f"{d.get('node_id')} online={d.get('online')} internet={d.get('internet')}")
+    return jsonify(ok=True)
+
+
+@app.route("/api/admin/mesh/reset", methods=["POST"])
+@api_roles("admin")
+def mesh_reset():
+    mesh.reset()
+    audit(current_user()["username"], "mesh_reset", "")
+    return jsonify(ok=True)
+
+
+def _mesh_key_ok():
+    return hmac.compare_digest(request.headers.get("X-Mesh-Key", ""), MESH_GATEWAY_KEY)
+
+
+@app.route("/api/mesh/ingest", methods=["POST"])
+def mesh_ingest():
+    """A REAL LoRa/Meshtastic gateway forwards a text from the radio mesh, e.g. 'SOS medical 25.61,85.16'."""
+    if not _mesh_key_ok():
+        return jsonify(error="Forbidden"), 403
+    d = request.get_json(silent=True) or {}
+    sender = str(d.get("from") or "mesh node")[:40]
+    sos = sms.parse_sos(str(d.get("text") or ""))
+    if not sos:
+        return jsonify(ok=True, reply="RescuNet: to ask for help send  SOS medical|food <lat>,<lng>")
+    urgency, lat, lng = sos
+    if lat is None:                                     # fall back to the GPS position of the radio node
+        try:
+            lat, lng = float(d["lat"]), float(d["lng"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify(ok=True, reply="RescuNet: send your location too, e.g. SOS medical 25.61,85.16")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return jsonify(ok=True, reply="RescuNet: location looks wrong, please resend.")
+    if time.time() - mesh_last.get(sender, 0) < 60:
+        return jsonify(ok=True, reply="RescuNet: please wait a minute before another SOS.")
+    mesh_last[sender] = time.time()
+    try:
+        hops = int(d.get("hops") or 0)
+    except (TypeError, ValueError):
+        hops = 0
+    a = create_sos(None, sender, "", lat, lng, urgency, ack=False, via="mesh", mesh_path=["LoRa mesh", f"{hops} hop(s)"])
+    return jsonify(ok=True, alert_id=a["id"], reply=f"RescuNet: SOS #{a['id']} received. {a['volunteers_notified']} volunteer(s) alerted.")
+
+
+@app.route("/api/mesh/outbox")
+def mesh_outbox():
+    """The real gateway polls this and broadcasts the texts into the radio mesh."""
+    if not _mesh_key_ok():
+        return jsonify(error="Forbidden"), 403
+    since = request.args.get("since", 0, type=int)
+    return jsonify(items=[x for x in mesh.outbox if x["id"] > since])
 
 
 @app.route("/api/admin/audit")
