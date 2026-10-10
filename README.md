@@ -105,3 +105,13 @@ memory, so they reset when the server restarts (users are asked again on their n
 - Real hardware: gateway/meshtastic_gateway.py (UNTESTED example, needs Meshtastic LoRa boards) posts radio texts such as
   "SOS medical 25.61,85.16" to /api/mesh/ingest and broadcasts /api/mesh/outbox alerts into the radio mesh.
   Set MESH_GATEWAY_KEY (same value on server and gateway). A browser cannot be a mesh node.
+
+## Live demo for the control room (v8)
+Admin panel -> "Live demo": drag the water-level slider (or press presets / "Auto-rise 10 -> 16 m"). Each release sends a real
+sensor reading; the panel explains what happened (watch -> rising fast -> warning at 14 m -> AUTOMATIC SIREN at 15 m) and how many
+screens / push devices / SMS numbers it reached. "Reset rivers to normal" lets you repeat the demo.
+- Demo tip: in the public-site window do NOT press "Enable local alerts" (a device whose location is far from the sensor, e.g. >25 km,
+  correctly gets no automatic siren). Tap once on the page so the browser allows sound.
+- Drill mode (button on the same card, 30 min, switches itself off): the siren/warnings show on connected screens marked [DEMO],
+  but NO SMS / push is sent. It never applies to real sensor hardware (X-IoT-Key readings).
+- The siren repeats at most every 2 minutes for a river that stays above 15 m; going below 15 m and rising again triggers a fresh one.

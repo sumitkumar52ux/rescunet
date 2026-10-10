@@ -38,6 +38,38 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <div class="card p-4 text-sm text-slate-300">You can update relief-camp occupancy and stock. Siren, sensors and SOS dispatch are restricted to control-room officers.</div>
 {% endif %}
 
+{% if role == 'admin' %}
+  <!-- ===== Live demo: move the river level and watch the automatic siren ===== -->
+  <section id="demoCard" class="card p-5 border-2 border-sky-500/60 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="text-xl font-bold">🎬 Live demo: raise the river and watch the siren start by itself</h2>
+      <div class="flex flex-wrap gap-2 text-sm">
+        <button id="drillBtn" class="px-3 py-1 rounded-full border border-yellow-400 text-yellow-300">Drill mode: OFF</button>
+        <button id="demoReset" class="px-3 py-1 rounded-full border border-white/30">↺ Reset rivers to normal</button>
+        <a href="/" target="_blank" rel="noopener" class="px-3 py-1 rounded-full border border-white/30">Open public view ↗</a>
+      </div>
+    </div>
+    <div id="drillBanner" class="hidden rounded-lg bg-yellow-500/20 border border-yellow-500 px-3 py-2 text-sm"></div>
+    <p class="text-sm text-slate-300">Drag the slider and release - the level is sent to the system exactly like a real sensor reading. Open the public site in a second window (tap once on it so sound is allowed) and watch it react. The siren screen also appears on this page: press <b>MUTE</b> to continue.</p>
+    <div class="grid md:grid-cols-3 gap-4 items-end">
+      <div><label class="text-xs" for="demoSensor">River sensor</label><select id="demoSensor"><option value="1">Ganges River Gauge</option><option value="2">Kosi Basin Level</option></select></div>
+      <div class="md:col-span-2 text-right"><span class="text-xs text-slate-400">Water level</span><div id="demoVal" class="text-5xl font-extrabold">10.0 m</div></div>
+    </div>
+    <div>
+      <input id="demoSlider" type="range" min="8" max="18" step="0.1" value="10" aria-label="River water level in metres"
+        style="padding:0;height:14px;border:0;border-radius:7px;background:linear-gradient(90deg,#38A169 0 40%,#ECC94B 40% 60%,#ED8936 60% 70%,#E53E3E 70% 100%)">
+      <div class="relative text-[11px] text-slate-400 h-4 mt-1"><span class="absolute" style="left:0">8 m</span><span class="absolute" style="left:40%">12 watch</span><span class="absolute" style="left:60%">14 warning</span><span class="absolute" style="left:70%">15 DANGER</span><span class="absolute right-0">18 m</span></div>
+    </div>
+    <div class="flex flex-wrap gap-2 text-sm">
+      <button data-preset="10" class="px-3 py-1 rounded bg-green-700">Normal 10</button><button data-preset="12.5" class="px-3 py-1 rounded bg-yellow-600">Watch 12.5</button>
+      <button data-preset="14.3" class="px-3 py-1 rounded bg-orange-600">Warning 14.3</button><button data-preset="15.4" class="px-3 py-1 rounded bg-red-600">Danger 15.4</button>
+      <button id="sweepBtn" class="px-3 py-1 rounded border border-sky-400 text-sky-300">▶ Auto-rise 10 → 16 m</button>
+    </div>
+    <div id="zoneCards" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs"></div>
+    <div><h3 class="font-bold text-sm mb-1">What the system just did</h3><ul id="demoLog" class="space-y-1 text-sm max-h-60 overflow-y-auto"><li class="text-slate-400">Move the slider to begin.</li></ul></div>
+  </section>
+{% endif %}
+
   <section class="grid lg:grid-cols-2 gap-6">
   {% if role == 'admin' %}
     <div class="card p-5"><h2 class="text-xl font-bold mb-1">IoT water sensors</h2><p class="text-sm text-slate-400 mb-4">Bar turns yellow at 12 m (watch), orange at 14 m (warning), red at 15 m (danger → automatic siren near that sensor).</p><div id="sensors" class="space-y-4"></div></div>
@@ -184,19 +216,64 @@ async function rSms(){const r=await fetch('/api/admin/sms');if(!r.ok)return;cons
   const pu=d.push;$('pushStatus').innerHTML='🔔 Background push (works when the website is closed): '+(pu.configured?'<b class="text-green-300">READY</b> · '+pu.subscribers+' device(s) subscribed':'<b class="text-yellow-300">NOT configured</b> – missing: '+esc(pu.missing.join(', ')));
   $('smsList').innerHTML=d.messages.map(m=>`<li class="rounded bg-[#0B192C] p-2"><span class="${m.dir==='in'?'text-sky-300':'text-green-300'} font-bold">${m.dir==='in'?'⬅ from':'➡ to'} ${esc(m.to)}</span> ${m.name?'('+esc(m.name)+')':''} · <span class="text-slate-400">${esc(m.time.slice(11))} · ${esc(m.kind)} · ${esc(m.status)}</span><br>${esc(m.text)}</li>`).join('')||'<li class="text-slate-400">No messages yet.</li>'}
 
+/* ---- live demo: slider -> real sensor reading -> explanation of what happened ---- */
+const ZONES=[
+  {name:'Normal',range:'below 12 m',c:'#38A169',txt:'Nothing is sent. The AI forecast keeps watching the trend.'},
+  {name:'Watch',range:'12 – 14 m',c:'#ECC94B',txt:'A jump of 0.5 m or more between readings sends a "water rising fast" warning. The AI forecast can send an early warning if danger is expected within 60 minutes.'},
+  {name:'Warning',range:'14 – 15 m',c:'#ED8936',txt:'Warning message to everyone within 25 km of the sensor (app, push, SMS).'},
+  {name:'DANGER',range:'15 m and above',c:'#E53E3E',txt:'SIREN STARTS AUTOMATICALLY: full-screen alarm + vibration near the sensor, SMS, push to phones with the site closed, mesh broadcast, audit log. Repeats at most every 2 minutes.'}];
+const zoneIdx=l=>l>=15?3:l>=14?2:l>=12?1:0;
+let sweepTimer=null,drillLeft=0,applying=false;
+function renderZones(l){$('zoneCards').innerHTML=ZONES.map((z,i)=>`<div class="rounded-lg p-3 border-2" style="border-color:${i===zoneIdx(l)?z.c:'transparent'};background:${i===zoneIdx(l)?z.c+'33':'#0B192C'}"><div class="font-bold" style="color:${z.c}">${z.name} <span class="text-slate-300 font-normal">· ${z.range}</span></div><div class="text-slate-200 mt-1">${z.txt}</div></div>`).join('')}
+function demoLog(kind,text){const c={siren:'text-red-300',warn:'text-orange-300',forecast:'text-sky-300',info:'text-slate-300',ok:'text-green-300'}[kind]||'text-slate-300';
+  const li=document.createElement('li');li.className=c;li.textContent=new Date().toLocaleTimeString()+'  '+text;$('demoLog').prepend(li);if($('demoLog').children.length>40)$('demoLog').lastChild.remove()}
+function describe(d,v){
+  const ev=d.events||[],n=[];
+  const reach=`${d.clients_in_range} connected screen(s) near this sensor, ${d.push_devices} phone(s) via push, ${d.sms_recipients} SMS number(s)`;
+  if(ev.includes('siren'))n.push(['siren',`🚨 SIREN triggered automatically at ${v.toFixed(1)} m (≥ 15.0 m danger level) → ${reach}${d.drill?' - DRILL: SMS/push NOT really sent':''}.`]);
+  else if(d.sensor.state==='critical')n.push(['info',`Above 15 m, but the siren already sounded for this sensor in the last 2 minutes (it repeats at most every 2 min). Lower the level below 15 m and raise it again for a fresh siren, or press MASTER SIREN.`]);
+  if(ev.includes('rising'))n.push(['warn',`🌊 "Water rising fast" warning sent → ${reach}.`]);
+  if(ev.includes('warning'))n.push(['warn',`⚠️ Warning level (14 m) crossed → warning sent → ${reach}.`]);
+  if(ev.includes('forecast'))n.push(['forecast',`🔮 AI forecast: danger level expected soon → early warning sent (${d.sensor.forecast.note}, about ${d.sensor.forecast.eta_danger_min} min).`]);
+  if(!n.length)n.push(['ok',`Level set to ${v.toFixed(1)} m → no alert needed at this level.`]);
+  n.forEach(([k,t])=>demoLog(k,t));
+}
+async function applyDemo(v){
+  applying=true;const d=await api('/api/sensors/update',{sensor_id:+$('demoSensor').value,current_level:v});applying=false;
+  if(d.ok){describe(d,v);load()}
+}
+function showVal(v){$('demoVal').textContent=v.toFixed(1)+' m';$('demoVal').style.color=ZONES[zoneIdx(v)].c;renderZones(v)}
+function setVal(v){$('demoSlider').value=v;showVal(+v);return applyDemo(+v)}
+function syncDemo(){const s=S.sensors.find(x=>x.id===+$('demoSensor').value);if(s&&!applying&&!sweepTimer&&document.activeElement!==$('demoSlider')){$('demoSlider').value=s.current_level;showVal(s.current_level)}}
+$('demoSlider').oninput=e=>showVal(+e.target.value);
+$('demoSlider').onchange=e=>applyDemo(+e.target.value);
+$('demoSensor').onchange=syncDemo;
+document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>setVal(+b.dataset.preset));
+function stopSweep(){clearInterval(sweepTimer);sweepTimer=null;$('sweepBtn').textContent='▶ Auto-rise 10 → 16 m'}
+$('sweepBtn').onclick=()=>{if(sweepTimer){stopSweep();return}let v=10;setVal(v);$('sweepBtn').textContent='⏹ Stop';
+  sweepTimer=setInterval(()=>{v=Math.round((v+0.5)*10)/10;if(v>16){stopSweep();return}setVal(v)},2500)};
+$('demoReset').onclick=async()=>{stopSweep();const d=await api('/api/admin/demo/reset');if(d.ok){demoLog('ok','Rivers reset to normal (10 m), forecast history cleared.');await load()}};
+/* drill mode */
+function renderDrill(){const on=drillLeft>0;$('drillBtn').textContent='Drill mode: '+(on?'ON':'OFF');$('drillBtn').className='px-3 py-1 rounded-full border '+(on?'bg-yellow-500 text-black border-yellow-500 font-bold':'border-yellow-400 text-yellow-300');
+  $('drillBanner').classList.toggle('hidden',!on);
+  if(on)$('drillBanner').innerHTML=`🟡 <b>DRILL MODE ON</b> · ${Math.floor(drillLeft/60)}:${String(drillLeft%60).padStart(2,'0')} left. Alerts show on connected screens marked <b>[DEMO]</b>. <b>No SMS or push is sent.</b> Real sensor hardware is never affected. It switches itself off - and turn it off before any real emergency.`}
+$('drillBtn').onclick=async()=>{const d=await api('/api/admin/drill',{on:drillLeft<=0,minutes:30});if(d.ok){drillLeft=d.drill_left_s;renderDrill()}};
+setInterval(()=>{if(drillLeft>0){drillLeft--;renderDrill()}},1000);
+renderZones(10);showVal(10);
+
 /* ---- master siren: typed confirmation ---- */
 $('sirenBtn').onclick=()=>{$('smsCount').textContent=S.sms_recipients;$('sirenConfirm').value='';$('sirenGo').disabled=true;$('sirenModal').classList.remove('hidden');$('sirenConfirm').focus()};
 $('sirenConfirm').oninput=()=>{$('sirenGo').disabled=$('sirenConfirm').value.trim().toUpperCase()!=='SIREN'};
 $('sirenNo').onclick=()=>$('sirenModal').classList.add('hidden');
 $('sirenGo').onclick=async()=>{$('sirenGo').disabled=true;await api('/api/admin/siren',{message:$('sirenMsg').value});$('sirenModal').classList.add('hidden');rAudit();rSms()};
 
-socket.on('sensor_update',s=>{const i=S.sensors.findIndex(x=>x.id===s.id);if(i>-1)S.sensors[i]=s;rSensors();drawMap()});
+socket.on('sensor_update',s=>{const i=S.sensors.findIndex(x=>x.id===s.id);if(i>-1)S.sensors[i]=s;rSensors();drawMap();syncDemo()});
 socket.on('new_distress_alert',a=>{S.alerts=S.alerts.filter(x=>x.id!==a.id);S.alerts.unshift(a);rSos()});
 socket.on('sos_update',u=>{const i=S.alerts.findIndex(x=>x.id===u.id);if(i<0)return;if(u.status==='resolved')S.alerts.splice(i,1);else Object.assign(S.alerts[i],u);rSos();rAudit()});
 {% endif %}
 
 async function load(){const r=await fetch('/api/state');S=await r.json();rCamps();
-  {% if role == 'admin' %}rSensors();rSos();rAudit();{% endif %}}
+  {% if role == 'admin' %}rSensors();rSos();rAudit();drillLeft=S.drill_left_s||0;renderDrill();syncDemo();{% endif %}}
 load();
 {% if role == 'admin' %}rSms();setInterval(rAudit,15000);setInterval(rSms,5000);{% endif %}
 </script></body></html>

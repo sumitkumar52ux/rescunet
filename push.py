@@ -31,6 +31,11 @@ except Exception:                                   # package not installed -> p
 subs = []        # {"endpoint","keys":{"p256dh","auth"},"user_id","lat","lng","lang"}
 history = []     # last send results (shown in the admin panel)
 _lock = threading.Lock()
+_tl = threading.local()          # drill mode: nothing is sent to phones
+
+
+def suppress(flag):
+    _tl.on = bool(flag)
 
 
 def configured():
@@ -83,6 +88,11 @@ def set_location(endpoint, lat, lng):
 def notify(targets, payload):
     """payload: kind, title, body (+ title_hi, body_hi), url, tag, urgent. Never blocks a web request."""
     targets = list(targets)
+    if getattr(_tl, "on", False):
+        history.insert(0, {"time": datetime.now().isoformat(timespec="seconds"), "kind": payload.get("kind"),
+                           "targets": len(targets), "ok": 0, "failed": 0, "note": "DRILL - not sent"})
+        del history[30:]
+        return 0
     if not targets or not configured():
         return 0
     if SYNC:

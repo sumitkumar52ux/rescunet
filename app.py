@@ -18,6 +18,7 @@ import re
 import threading
 import secrets
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from functools import wraps
 from itertools import count
@@ -101,6 +102,8 @@ rescue_teams = {
     3: {"id": 3, "name": "Team 3", "lat": 25.5700, "lng": 85.2200, "status": "On Duty", "distance_km": 5.1},
 }
 last_siren = {"payload": None, "time": 0.0}   # lets a device that opens the site from a notification start the siren screen
+drill = {"until": 0.0}      # DRILL MODE: alerts play on connected screens only, no SMS/push; switches itself off
+_ctx = threading.local()
 community_reports = []
 notifications = [{"type": "info", "title": "RescuNet is live", "body": "Monitoring river sensors and relief camps.", "created_at": ""}]
 
@@ -177,7 +180,33 @@ def camp_view(c):
     return {**c, "food_status": stock_status(c["food_stock"]), "medical_status": stock_status(c["medical_stock"])}
 
 
+def drill_on():
+    return time.time() < drill["until"]
+
+
+@contextmanager
+def drill_scope(flag):
+    """While active: texts get a [DEMO] prefix and nothing is sent by SMS or push."""
+    _ctx.drill = bool(flag)
+    sms.suppress(flag)
+    push.suppress(flag)
+    try:
+        yield
+    finally:
+        _ctx.drill = False
+        sms.suppress(False)
+        push.suppress(False)
+
+
+def _drill_text(en, hi=None):
+    if getattr(_ctx, "drill", False):
+        return "[DEMO] " + en, ("[डेमो] " + hi if hi else hi)
+    return en, hi
+
+
 def push_notification(ntype, title, body):
+    if getattr(_ctx, "drill", False):
+        title = "[DEMO] " + title
     n = {"type": ntype, "title": title, "body": body, "created_at": now()}
     notifications.insert(0, n)
     del notifications[30:]
@@ -242,6 +271,7 @@ WARNING_TITLES = {"rising": ("🌊 Water rising fast", "🌊 पानी ते
 
 
 def emit_warning(sids, severity, message, message_hi=None, sensor=None):
+    message, message_hi = _drill_text(message, message_hi)
     for sid in sids:
         socketio.emit("flood_warning", {"severity": severity, "message": message, "message_hi": message_hi,
                                         "timestamp": now()}, to=sid)
@@ -257,6 +287,7 @@ def broadcast_emergency(message, source, sids=None, message_hi=None, sensor=None
     """THE siren. sids=None -> every connected client (admin MASTER SIREN).
     sids=[...]        -> only clients near the sensor that crossed the danger level.
     Web Push goes out too, so phones with the website CLOSED are woken up."""
+    message, message_hi = _drill_text(message, message_hi)
     payload = {"message": message, "message_hi": message_hi, "source": source, "lead_time": "30-60 minutes", "timestamp": now()}
     last_siren.update(payload=payload, time=time.time())
     if sids is None:
@@ -520,7 +551,7 @@ def get_state():
         "vapid_public_key": push.PUBLIC if push.configured() else "",
         **({"volunteers_list": [{"id": v["id"], "name": v["name"], "skill": v["skill"], "phone": v["phone"],
                                  "lat": v["lat"], "lng": v["lng"]} for v in users.values() if v["role"] == "volunteer"],
-            "sms_recipients": len(sms_all_users())} if u and u["role"] == "admin" else {}),
+            "sms_recipients": len(sms_all_users()), "drill_left_s": int(max(0, drill["until"] - time.time()))} if u and u["role"] == "admin" else {}),
     })
 
 
@@ -675,7 +706,7 @@ def community_report():
 # --------------------------------------------------------------------------
 # IoT sensors: admin session OR hardware key
 # --------------------------------------------------------------------------
-def apply_reading(sensor, level, actor, ts=None):
+def _apply_reading(sensor, level, actor, ts=None):
     """Store one water-level reading and run everything that follows from it: state, forecast, warnings, siren."""
     meta = sensor_meta[sensor["id"]]
     prev_level, prev_state = sensor["current_level"], sensor["state"]
@@ -689,11 +720,12 @@ def apply_reading(sensor, level, actor, ts=None):
     socketio.emit("sensor_update", sensor)
     refresh_zones()
 
-    targets, t, emergency = alert_targets(sensor), time.time(), False
+    targets, t, emergency, events = alert_targets(sensor), time.time(), False, []
     if sensor["state"] == "critical":
         # siren when the river first crosses danger level, then at most once per SIREN_REPEAT_S
         if prev_state != "critical" or t - meta["last_siren"] >= SIREN_REPEAT_S:
             emergency, meta["last_siren"] = True, t
+            events.append("siren")
             push_notification("danger", "Flood Alert", f"High water level detected: {sensor['name']} at {level:.1f} m.")
             broadcast_emergency(f"FLOOD EMERGENCY: {sensor['name']} reached {level:.1f} m (danger level "
                                 f"{sensor['danger_level']:.1f} m). Move to higher ground and the nearest relief camp NOW.",
@@ -715,6 +747,7 @@ def apply_reading(sensor, level, actor, ts=None):
         else:
             msg, severity = f"{sensor['name']} crossed the warning level ({level:.1f} m). Stay alert.", "warning"
             msg_hi = f"{sensor['name']} का जल स्तर चेतावनी स्तर ({level:.1f} मीटर) पार कर गया है। सतर्क रहें।"
+        events.append(severity)
         push_notification("warning", "Flood warning", msg)
         emit_warning(targets, severity, msg, msg_hi, sensor=sensor)
         sms.send_many(sms_recipients_for_sensor(sensor), f"RescuNet warning: {msg}", "warning")
@@ -726,6 +759,7 @@ def apply_reading(sensor, level, actor, ts=None):
             and fc["eta_danger_min"] is not None and fc["eta_danger_min"] <= PREDICT_WITHIN_MIN
             and t - meta["last_predict"] >= PREDICT_REPEAT_S):
         meta["last_predict"] = t
+        events.append("forecast")
         eta = max(5, int(round(fc["eta_danger_min"] / 5.0)) * 5)
         msg = (f"AI forecast: {sensor['name']} is rising about {fc['rate_m_per_h']:.1f} m/hour and may reach danger level "
                f"({sensor['danger_level']:.0f} m) in about {eta} minutes. Prepare to evacuate.")
@@ -735,7 +769,15 @@ def apply_reading(sensor, level, actor, ts=None):
         emit_warning(targets, "predicted", msg, msg_hi, sensor=sensor)
         sms.send_many(sms_recipients_for_sensor(sensor), f"RescuNet FORECAST: {msg}", "forecast")
         audit("system", "AI_FORECAST_WARNING", f"{sensor['name']}: danger in ~{eta} min (confidence {fc['confidence']})")
-    return {"emergency": emergency, "clients": len(targets)}
+    return {"emergency": emergency, "clients": len(targets), "events": events,
+            "sms_recipients": len(sms_recipients_for_sensor(sensor)), "push_devices": len(push_targets_for_sensor(sensor))}
+
+
+def apply_reading(sensor, level, actor, ts=None, drill=False):
+    with drill_scope(drill):
+        res = _apply_reading(sensor, level, actor, ts)
+    res["drill"] = bool(drill)
+    return res
 
 
 @app.route("/api/sensors/update", methods=["POST"])
@@ -752,8 +794,11 @@ def update_sensor():
     except (KeyError, TypeError, ValueError, AssertionError):
         return jsonify(error="valid sensor_id and current_level (0-50 m) required"), 400
 
-    res = apply_reading(sensor, level, u["username"] if u and not key_ok else "iot-device")
-    return jsonify(ok=True, sensor=sensor, emergency=res["emergency"], clients_in_range=res["clients"])
+    # drill mode only ever applies to readings typed by a logged-in admin - never to real sensor hardware
+    res = apply_reading(sensor, level, u["username"] if u and not key_ok else "iot-device",
+                        drill=bool(drill_on() and u and u["role"] == "admin" and not key_ok))
+    return jsonify(ok=True, sensor=sensor, emergency=res["emergency"], clients_in_range=res["clients"], events=res["events"],
+                   sms_recipients=res["sms_recipients"], push_devices=res["push_devices"], drill=res["drill"])
 
 
 # --------------------------------------------------------------------------
@@ -769,11 +814,12 @@ def master_siren():
     msg = custom or ("OFFICIAL FLOOD WARNING: Severe flooding expected within 30-60 minutes. "
                      "Evacuate to the nearest relief camp immediately.")
     msg_hi = None if custom else "सरकारी बाढ़ चेतावनी: अगले 30-60 मिनट में भीषण बाढ़ की आशंका है। तुरंत नज़दीकी राहत शिविर की ओर निकलें।"
-    audit(u["username"], "MASTER_SIREN", msg)
-    push_notification("danger", "Official evacuation order", msg)
-    broadcast_emergency(msg, f"Authorized official ({u['name']})", message_hi=msg_hi)
-    sms.send_many(sms_all_users(), f"RescuNet OFFICIAL ALERT: {msg}", "siren")
-    return jsonify(ok=True)
+    with drill_scope(drill_on()):
+        audit(u["username"], "MASTER_SIREN", msg)
+        push_notification("danger", "Official evacuation order", msg)
+        broadcast_emergency(msg, f"Authorized official ({u['name']})", message_hi=msg_hi)
+        sms.send_many(sms_all_users(), f"RescuNet OFFICIAL ALERT: {msg}", "siren")
+    return jsonify(ok=True, drill=drill_on())
 
 
 @app.route("/api/admin/camps/<int:camp_id>", methods=["POST"])
@@ -894,7 +940,7 @@ def run_simulation(sensor, scenario):
             if sim["stop"]:
                 break
             sim["step"] = i + 1
-            apply_reading(sensor, lv, "simulator", ts=base + 600 * (i + 1))
+            apply_reading(sensor, lv, "simulator", ts=base + 600 * (i + 1), drill=drill_on())
             time.sleep(SIM_TICK_S)
     finally:
         sim["running"] = False
@@ -1020,6 +1066,39 @@ def mesh_outbox():
         return jsonify(error="Forbidden"), 403
     since = request.args.get("since", 0, type=int)
     return jsonify(items=[x for x in mesh.outbox if x["id"] > since])
+
+
+@app.route("/api/admin/drill", methods=["POST"])
+@api_roles("admin")
+def set_drill():
+    """DRILL MODE for demos: alerts show on connected screens marked [DEMO], but NO SMS / push is sent.
+    It switches itself off after a while so a real emergency can never be silenced for long."""
+    d = request.get_json(silent=True) or {}
+    if d.get("on"):
+        try:
+            minutes = max(1, min(120, int(d.get("minutes", 30))))
+        except (TypeError, ValueError):
+            minutes = 30
+        drill["until"] = time.time() + minutes * 60
+    else:
+        drill["until"] = 0.0
+    audit(current_user()["username"], "DRILL_ON" if d.get("on") else "DRILL_OFF", "")
+    return jsonify(ok=True, drill_left_s=int(max(0, drill["until"] - time.time())))
+
+
+@app.route("/api/admin/demo/reset", methods=["POST"])
+@api_roles("admin")
+def demo_reset():
+    """Put both rivers back to normal (and clear their forecast history) so a demo can be repeated."""
+    for sid, sensor in iot_water_sensors.items():
+        sensor.update(current_level=sensor["baseline"], state="normal", trend=0.0, updated_at=None)
+        forecast.reset(sid)
+        sensor["forecast"] = forecast.predict(sid, sensor["warning_level"], sensor["danger_level"])
+        sensor_meta[sid].update(last_siren=0.0, last_warn=0.0, last_predict=0.0)
+        socketio.emit("sensor_update", sensor)
+    refresh_zones()
+    audit(current_user()["username"], "demo_reset", "rivers back to normal")
+    return jsonify(ok=True)
 
 
 @app.route("/api/admin/audit")

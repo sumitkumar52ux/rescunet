@@ -24,6 +24,11 @@ MODE = os.environ.get("SMS_MODE", "demo").lower()
 outbox = []                      # newest first: both sent ("out") and received ("in") messages
 _lock = threading.Lock()
 _counter = [0]
+_tl = threading.local()          # drill mode: records the SMS in the outbox but does not send it
+
+
+def suppress(flag):
+    _tl.on = bool(flag)
 
 
 def status():
@@ -67,6 +72,9 @@ def send_sms(phone, text, kind="alert", name=""):
     if not to:
         return None
     rec = _record("out", to, text[:300], kind, name, "queued")
+    if getattr(_tl, "on", False):
+        rec["status"] = "DRILL - not sent"
+        return rec
     if MODE == "demo":
         rec["status"] = "demo (not really sent)"
     else:
